@@ -8,6 +8,7 @@ Run ONLY after the user has saved open work and said go, one phase at a time:
     .venv\\Scripts\\python.exe tests\\live\\safety_check.py busy         # while the user is inside LINE
     .venv\\Scripts\\python.exe tests\\live\\safety_check.py busy         # again with a modal dialog open
     .venv\\Scripts\\python.exe tests\\live\\safety_check.py idle         # after Esc / closing the dialog
+    .venv\\Scripts\\python.exe tests\\live\\safety_check.py cleanup      # closes the scratch drawing
 
 Calls the tool functions directly (no MCP client) and works only in new scratch drawings; the
 user's own drawings are only read, and two edits on them are attempted to prove they are refused.
@@ -194,8 +195,16 @@ def phase_idle(state: dict) -> None:
     step("draw after the user is done works again", draw.draw_circle, [10, 10], 1, name=c)
 
 
+def phase_cleanup(state: dict) -> None:
+    c = scratch_drawing(state)
+    step("close the undo/busy scratch drawing (ours, discard)", documents.close_document, c, discard_changes=True)
+    if state.get("opened_file"):
+        print(f"\nLeft open on purpose: '{state['opened_file']}', a scratch file the server opened. It is locked,"
+              " so the server can't close it. Close it in AutoCAD; it has no changes.")
+
+
 PHASES = {"tools": phase_tools, "undo-prepare": phase_undo_prepare, "undo-check": phase_undo_check,
-          "undo-check2": phase_undo_check2, "busy": phase_busy, "idle": phase_idle}
+          "undo-check2": phase_undo_check2, "busy": phase_busy, "idle": phase_idle, "cleanup": phase_cleanup}
 
 
 def main() -> int:
