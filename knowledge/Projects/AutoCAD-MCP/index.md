@@ -26,6 +26,9 @@ An MCP server that lets Claude drive the AutoCAD 2027 session already running on
 ## 2026-11-03: installable for AutoCAD users
 - **verified 2026-11-03** (this PC, sandboxed uv): installs without git, Python or a venv, via `uvx` from the GitHub ZIP or the `.mcpb` bundle; both answered the MCP handshake with 32 tools. Not yet installed in the Claude desktop app, and the repository is still private. See [[Decisions/Distribution and install]]; the user guide is `INSTALL.md`. Licence: MIT.
 
+## 2026-11-03: public
+- **verified 2026-11-03:** public at https://github.com/ajaquin8/autocad-mcp (fresh one-commit history). The full development history stays in the private `ajaquin8/autocad-mcp-dev`. See [[Decisions/Distribution and install]].
+
 ## History
 - 2026-10-29: Alex compared the existing AutoCAD MCP servers ([[Research/AutoCAD MCP landscape]]) and chose to build one in the style of inventor-mcp.
 

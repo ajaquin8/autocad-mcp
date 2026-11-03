@@ -1,7 +1,7 @@
 # Distribution and install for AutoCAD users
 
 Date: 2026-11-03
-Status: **adopted** (Alex chose licence, visibility and PyPI on 2026-11-03; the repository is not public yet)
+Status: **adopted** (Alex chose licence, visibility and PyPI on 2026-11-03; public since 2026-11-03, see the dated section)
 Owner: Alex
 
 ## Decision
@@ -39,6 +39,11 @@ Owner: Alex
 - Windows path length: a uv cache under a very deep folder failed to build the package (WinError 206 inside setuptools' `bdist_wheel`). The default cache (`%LOCALAPPDATA%\uv\cache`) and a Claude extension folder are short enough (verified with an equivalent-length folder).
 - uv picks the newest CPython that satisfies `requires-python >=3.12` (3.15.2 today). The server's handshake works on it; live AutoCAD use on 3.15 is not tested.
 - Before going public: Alex reviews the personal/work reference list (2026-11-03 hand-over), then the repository is made public and a GitHub Release with the `.mcpb` is created, each only on Alex's go.
+
+## 2026-11-03: public
+- **verified 2026-11-03:** on Alex's go ("Fresh public repo", then "Merged, go"), the private repository with the full history was renamed to `ajaquin8/autocad-mcp-dev` (still private), and a new **public** `ajaquin8/autocad-mcp` was created with one commit (`1d08497`, author and committer `ajaquin8` with the GitHub noreply address). Its content is identical to the archive's `main` after PRs #5 and #6 (same tree hash). A fresh repository was chosen because older commits and two commit authors held company details, and GitHub keeps old commits reachable through closed pull requests.
+- **verified:** installing from the public `main.zip` exactly as INSTALL.md says (uv with its own CPython 3.15.2, fresh cache, git not on PATH) passed the MCP handshake with 32 tools. CI passed on the first push. GitHub recognises the MIT licence, CONTRIBUTING.md, the PR template and the install-help link; the issue-form file views show no template errors.
+- **unresolved:** the New issue page was not viewed signed in. No GitHub Release (and so no `.mcpb` download) yet; INSTALL.md's Releases link is empty until there is one.
 
 ## Supersedes / superseded by
 - Supersedes the per-PC `.mcp.json` path noted in [[Change log]] (2026-11-03, work PC setup).

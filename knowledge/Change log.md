@@ -77,3 +77,10 @@ Writer: Claude Code side session (Alex: "Yes, clean up", after reviewing the lis
 - Kept on purpose: attribution of Alex's go-aheads and requests in the vault (evidence labels need it), and the generic words "work PC", which already appear in commit messages and pull request texts.
 - Validation: re-scan of tracked text files finds no company name, drive letter, work email, user folder or speaker profile; `scripts/check.ps1` green.
 - Not changed here: git history. Older versions of files and two commit authors (`1af1c23`, `2df6359`, a work email address) still contain the old details; rewriting them needs a force-push and Alex's separate go.
+
+## 2026-11-03: public repository
+Writer: Claude Code side session (Alex: "Fresh public repo", then "Merged, go").
+- GitHub: the private repository was renamed `ajaquin8/autocad-mcp-dev` (full history, PRs #1–#6, still private). A new public `ajaquin8/autocad-mcp` holds one commit with the same content (`1d08497`, noreply author). The old local clone's `origin` now points to the archive, so its history can't be pushed here by accident; new work is cloned from the public repository.
+- Updated [[Decisions/Distribution and install]] and [[Projects/AutoCAD-MCP/index]].
+- Validation: the INSTALL.md route from the public `main.zip` passed the handshake (32 tools, git not on PATH); CI green on the first push; `scripts/check.ps1` green.
+- Not done: GitHub Release with the `.mcpb`, the `compatibility` label, protection of `main`, email privacy setting.
