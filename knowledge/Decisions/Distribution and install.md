@@ -57,7 +57,7 @@ Owner: Alex
 
 ## 2026-11-03: repository settings for contributors
 - **verified 2026-11-03 (GitHub API, on Alex's go "Lets do 1 next"):** label `compatibility` created (used by the "Works on my AutoCAD" form). `main` is protected: changes only through pull requests (0 approvals required, so Alex merges his own), the `check` CI job must pass, no force-pushes, no deletion; `enforce_admins` is off, so Alex can override in an emergency. "Branch must be up to date" is off on purpose, because PRs often touch the change log at the same place.
-- **user-reported 2026-11-03:** Alex turned on GitHub email privacy himself.
+- **user-reported 2026-11-03:** Alex turned on GitHub email privacy in the account settings.
 
 ## Supersedes / superseded by
 - Supersedes the per-PC `.mcp.json` path noted in [[Change log]] (2026-11-03, work PC setup).
