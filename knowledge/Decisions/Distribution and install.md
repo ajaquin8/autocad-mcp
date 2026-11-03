@@ -45,5 +45,12 @@ Owner: Alex
 - **verified:** installing from the public `main.zip` exactly as INSTALL.md says (uv with its own CPython 3.15.2, fresh cache, git not on PATH) passed the MCP handshake with 32 tools. CI passed on the first push. GitHub recognises the MIT licence, CONTRIBUTING.md, the PR template and the install-help link; the issue-form file views show no template errors.
 - **unresolved:** the New issue page was not viewed signed in. No GitHub Release (and so no `.mcpb` download) yet; INSTALL.md's Releases link is empty until there is one.
 
+## 2026-11-03: bundle installed in the Claude desktop app
+- **verified 2026-11-03 (Alex's PC, Claude desktop app 4.4212, Windows 11):** Alex installed `autocad-mcp-0.1.0.mcpb` from the v0.1.0 Release by double-click. It appeared under Settings → Extensions, enabled. **The app brought its own uv** (`%APPDATA%\Claude\uv-runtime\uv-0.9.7-win32-x64\uv.exe`) and ran `uv run --directory <extension folder> autocad-mcp`, although uv was not installed on the PC; the extension's `.venv` used the installed CPython 3.12.10. This **supersedes** the earlier **unresolved** point above: bundle users don't need to install uv.
+- **user-reported 2026-11-03:** `acad_status` worked from a Chat conversation and from a Cowork task (Alex: "Both worked"). The open drawings were reported locked, as designed.
+- **verified (from the reply Alex pasted):** Claude read `"autocad": "25.1s …"` as "AutoCAD 2025"; 25.1 is AutoCAD 2026. `acad_status` should state the product year itself (follow-up fix).
+- **inferred:** on a PC without Python, the app's uv downloads a managed CPython (uv's default); not tested.
+- INSTALL.md now leads with the bundle for the desktop app (Chat and Cowork, no uv) and keeps uv for Claude Code and the config-file fallback.
+
 ## Supersedes / superseded by
 - Supersedes the per-PC `.mcp.json` path noted in [[Change log]] (2026-11-03, work PC setup).

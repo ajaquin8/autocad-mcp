@@ -84,3 +84,10 @@ Writer: Claude Code side session (Alex: "Fresh public repo", then "Merged, go").
 - Updated [[Decisions/Distribution and install]] and [[Projects/AutoCAD-MCP/index]].
 - Validation: the INSTALL.md route from the public `main.zip` passed the handshake (32 tools, git not on PATH); CI green on the first push; `scripts/check.ps1` green.
 - Not done: GitHub Release with the `.mcpb`, the `compatibility` label, protection of `main`, email privacy setting.
+
+## 2026-11-03: bundle tested in the Claude desktop app
+Writer: Claude Code side session (Alex: "Yes, guide me", then installed the bundle and reported "Both worked").
+- The v0.1.0 `.mcpb` installed by double-click; the desktop app used its own uv 0.9.7, so bundle users need no uv. `acad_status` worked in Chat and in Cowork. Details in [[Decisions/Distribution and install]].
+- Changed: `INSTALL.md` (bundle first, for Chat and Cowork, without uv; uv only for Claude Code and the config-file fallback; updating per route), README install summary.
+- Found: Claude misread version `25.1` as AutoCAD 2025; a separate change makes `acad_status` report the year. Drawing names and paths from the pasted reply are not recorded.
+- Validation: `scripts/check.ps1` green.

@@ -11,9 +11,10 @@ Working rules for Claude are in [CLAUDE.md](CLAUDE.md).
 
 ## Install (AutoCAD users)
 
-Windows with full AutoCAD or a vertical (not AutoCAD LT, not Mac). No git, Python or venv needed:
-install [uv](https://docs.astral.sh/uv/), then either install the `.mcpb` bundle in the Claude
-desktop app or run
+Windows with full AutoCAD or a vertical (not AutoCAD LT, not Mac). No git, Python or venv needed.
+In the Claude desktop app (Chat and Cowork), install the `.mcpb` bundle from the
+[Releases page](https://github.com/ajaquin8/autocad-mcp/releases). For Claude Code, install
+[uv](https://docs.astral.sh/uv/) and run
 
 ```powershell
 claude mcp add autocad --scope user -- uvx --from https://github.com/ajaquin8/autocad-mcp/archive/refs/heads/main.zip autocad-mcp
