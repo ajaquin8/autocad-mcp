@@ -52,5 +52,8 @@ Owner: Alex
 - **inferred:** on a PC without Python, the app's uv downloads a managed CPython (uv's default); not tested.
 - INSTALL.md now leads with the bundle for the desktop app (Chat and Cowork, no uv) and keeps uv for Claude Code and the config-file fallback.
 
+## 2026-11-03: v0.1.1 checked live in the desktop app
+- **verified 2026-11-03 (live, reply Alex pasted from a Chat):** after installing `autocad-mcp-0.1.1.mcpb` from the v0.1.1 Release over 0.1.0, `acad_status` was answered as **"AutoCAD 2026 is running"**, with the open drawing reported locked (edit guard on). This closes the year mix-up found in the 0.1.0 test. Updating by installing the new bundle over the old one worked.
+
 ## Supersedes / superseded by
 - Supersedes the per-PC `.mcp.json` path noted in [[Change log]] (2026-11-03, work PC setup).
