@@ -7,7 +7,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 ## Session and drawings
 
-- **`acad_status`** (read-only): Connect to AutoCAD and report version, open drawings and which of them this server may edit. Call this first. Parameters: `start_if_needed`.
+- **`acad_status`** (read-only): Connect to AutoCAD and report which AutoCAD it is (e.g. "AutoCAD 2026"), the open drawings and which of them this server may edit. Call this first. Name the AutoCAD by the "autocad" field; "autocad_version" is AutoCAD's raw release number. Parameters: `start_if_needed`.
 - **`list_documents`** (read-only): List open drawings (name, path, unsaved changes, read-only, editable).
 - **`allow_edit_document`**: Unlock an EXISTING drawing so drawing tools may change it. Parameters: `name`.
 - **`new_drawing`**: Create a new drawing this server may edit. It becomes the active drawing. Parameters: `template`.

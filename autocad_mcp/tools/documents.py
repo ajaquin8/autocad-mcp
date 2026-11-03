@@ -6,13 +6,14 @@ import os
 
 from ..app import acad_tool
 from ..com import AcadError
-from ..session import doc_key, session
+from ..session import doc_key, product_name, session
 
 
 @acad_tool(read_only=True)
 def acad_status(start_if_needed: bool = False) -> dict:
-    """Connect to AutoCAD and report version, open drawings and which of them this
-    server may edit. Call this first.
+    """Connect to AutoCAD and report which AutoCAD it is (e.g. "AutoCAD 2026"), the open
+    drawings and which of them this server may edit. Call this first. Name the AutoCAD
+    by the "autocad" field; "autocad_version" is AutoCAD's raw release number.
 
     Args:
         start_if_needed: launch AutoCAD if it is not running (default False).
@@ -21,7 +22,8 @@ def acad_status(start_if_needed: bool = False) -> dict:
     docs = session.documents()
     active = app.ActiveDocument if docs else None
     return {
-        "autocad": str(app.Version),
+        "autocad": product_name(str(app.Version)),
+        "autocad_version": str(app.Version),
         "active_drawing": str(active.Name) if active is not None else None,
         "active_units": session.units(active) if active is not None else None,
         "open_drawings": [session.describe(d) for d in docs],

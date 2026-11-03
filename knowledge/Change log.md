@@ -91,3 +91,9 @@ Writer: Claude Code side session (Alex: "Yes, guide me", then installed the bund
 - Changed: `INSTALL.md` (bundle first, for Chat and Cowork, without uv; uv only for Claude Code and the config-file fallback; updating per route), README install summary.
 - Found: Claude misread version `25.1` as AutoCAD 2025; a separate change makes `acad_status` report the year. Drawing names and paths from the pasted reply are not recorded.
 - Validation: `scripts/check.ps1` green.
+
+## 2026-11-03: acad_status names the AutoCAD year (0.1.1)
+Writer: Claude Code side session (Alex: "Yes, fix it", after Claude read version 25.1 as AutoCAD 2025 in the desktop test).
+- `autocad_mcp/session.py`: `RELEASE_YEARS` and `product_name()`; `acad_status` returns `"autocad": "AutoCAD 2026"` plus the raw `autocad_version`, and its description tells Claude to use the first. `scripts/stdio_smoke.py` prints the new name.
+- Version 0.1.1 in `pyproject.toml` and `autocad_mcp/app.py`, with a test that keeps them equal. Updated [[Research/AutoCAD API gotchas]] and the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
+- Validation: three new offline tests; `scripts/check.ps1` green. **Not run against a live AutoCAD** (the mapping is a lookup on the version string already returned live: 25.1 on 2026, 26.0 on 2027).

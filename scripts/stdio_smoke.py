@@ -57,7 +57,7 @@ def main() -> int:
             print("acad_status error:", text)
         else:
             status = json.loads(text)
-            print(f"acad_status: AutoCAD {status['autocad']}, {len(status['open_drawings'])} open, "
+            print(f"acad_status: {status['autocad']}, {len(status['open_drawings'])} open, "
                   f"guard {status['edit_guard']}")
     proc.stdin.close()
     proc.wait(timeout=15)

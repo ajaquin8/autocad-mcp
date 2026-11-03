@@ -44,3 +44,6 @@ What the AutoCAD 2027 ActiveX (COM) API really does. Add a dated entry for every
 
 ## 2026-11-03: drawing tools on AutoCAD 2026 ([[Sources/2026-11-03 AutoCAD 2026 drawing]])
 - **verified:** `Documents.Add`, layers with a loaded linetype, `AddLightWeightPolyline` with bulges, lines, arcs, circles, TEXT, MTEXT, `AddDimRotated`, `ZoomExtents`, PrintWindow capture, `SaveAs` and `PlotToFile` behave on AutoCAD 2026 (R25.1) as on 2027: the same 33 steps passed with the same read-back values. **superseded (in part):** the "drawing tools on 2026" item left open above. Still open: which ProgID 2026 registers in the running object table, and how TrueView answers `FullName`/`Name`.
+
+## 2026-11-03: Application.Version is a release number, not a year
+- **verified 2026-11-03 (a reply Alex pasted from the Claude desktop app):** `acad_status` returned `"autocad": "25.1s (LMS Tech)"` and Claude called it "AutoCAD 2025"; release 25.1 is AutoCAD 2026 (consistent with the ProgID `.25.1` noted above). `acad_status` now names the product year from a table of release numbers (`session.RELEASE_YEARS`, 2013 to 2027) and keeps the raw string as `autocad_version`. A release missing from the table is reported as "release N.N", never guessed.

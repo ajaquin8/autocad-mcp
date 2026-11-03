@@ -35,7 +35,7 @@ automatically if it fails. Results report entity handles; use them with
 get_entity, move_entities, change_properties and delete_entities.
 """
 
-mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.0")
+mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.1")
 
 
 def _where(err: BaseException) -> str:

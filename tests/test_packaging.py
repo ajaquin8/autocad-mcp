@@ -6,6 +6,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 import tomllib
 import zipfile
 
@@ -34,6 +35,12 @@ def test_bundle_manifest_matches_the_package():
     listed = [t["name"] for t in m["tools"]]
     assert listed == [t.name for t in asyncio.run(mcp.list_tools())]
     assert "send_command" not in listed  # the raw command line stays opt-in
+
+
+
+def test_server_reports_the_package_version():
+    with open(os.path.join(ROOT, "autocad_mcp", "app.py"), encoding="utf-8") as f:
+        assert re.search(r'version="([^"]+)"', f.read())[1] == _project()["version"]
 
 
 def test_bundle_carries_what_uv_needs_and_nothing_private():
