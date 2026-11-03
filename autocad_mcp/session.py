@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import winreg
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -29,11 +30,29 @@ from .com import RPC_GONE_CODES, AcadError, enums
 # ProgID whose registered program is acad.exe.
 PROGID = "AutoCAD.Application"
 
+# Application.Version starts with the release number ("25.1s (LMS Tech)"), not the product year,
+# and Claude has guessed the year wrong from it (25.1 read as 2025). Autodesk's release numbers:
+RELEASE_YEARS = {
+    "19.0": 2013, "19.1": 2014, "20.0": 2015, "20.1": 2016, "21.0": 2017, "22.0": 2018, "23.0": 2019,
+    "23.1": 2020, "24.0": 2021, "24.1": 2022, "24.2": 2023, "24.3": 2024, "25.0": 2025, "25.1": 2026,
+    "26.0": 2027,
+}
+
 INSUNITS = {0: "unitless", 1: "inches", 2: "feet", 3: "miles", 4: "millimeters", 5: "centimeters",
             6: "meters", 7: "kilometers", 8: "microinches", 9: "mils", 10: "yards", 11: "angstroms",
             12: "nanometers", 13: "microns", 14: "decimeters", 15: "dekameters", 16: "hectometers",
             17: "gigameters", 18: "astronomical units", 19: "light years", 20: "parsecs",
             21: "US survey feet"}
+
+
+def product_name(version: str) -> str:
+    """'AutoCAD 2026' from an Application.Version such as '25.1s (LMS Tech)'."""
+    match = re.match(r"(\d+)\.(\d+)", version.strip())
+    if not match:
+        return f"AutoCAD (version {version})"
+    release = f"{int(match[1])}.{int(match[2])}"
+    year = RELEASE_YEARS.get(release)
+    return f"AutoCAD {year}" if year else f"AutoCAD release {release} (newer or older than this server knows)"
 
 
 def _env_flag(name: str) -> bool:

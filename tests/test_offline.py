@@ -16,7 +16,7 @@ from autocad_mcp import session as session_module
 from autocad_mcp.app import _render, _where
 from autocad_mcp.com import AcadError, AcadTimeout, ComWorker, deg, rad, xyz
 from autocad_mcp.server import mcp
-from autocad_mcp.session import Session, doc_key, session
+from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import documents, draw, edit, entities, layers, settings
 
 # ---------- coordinates ----------
@@ -346,6 +346,20 @@ def test_new_drawing_is_fetched_again_from_the_documents_collection(fake_app):
     info = documents.new_drawing()
     assert info["name"] == "Drawing2.dwg" and info["editable"] and info["units"] == "millimeters"
     assert info["read_only"] is False
+
+
+def test_release_numbers_become_product_years():
+    assert product_name("25.1s (LMS Tech)") == "AutoCAD 2026"  # once read as 2025 by Claude
+    assert product_name("25.0s (LMS Tech)") == "AutoCAD 2025"
+    assert product_name("26.0s (LMS Tech)") == "AutoCAD 2027"
+    assert product_name("24.3s (LMS Tech)") == "AutoCAD 2024"
+    assert product_name("27.0s") == "AutoCAD release 27.0 (newer or older than this server knows)"
+    assert product_name("unknown") == "AutoCAD (version unknown)"
+
+
+def test_status_names_the_product_year(fake_app):
+    status = documents.acad_status()
+    assert status["autocad"] == "AutoCAD 2027" and status["autocad_version"] == "26.0s (LMS Tech)"
 
 
 def test_close_refuses_user_drawings(fake_app):
