@@ -109,3 +109,9 @@ Writer: Claude Code side session (Alex: "Okay lets start with 1", then "Saved, g
 - Result on AutoCAD 2026: 41/44. Edit guard, one Ctrl+Z per tool, blocks, edits by handle and open/close passed; nothing was drawn inside LINE or with OPTIONS open, but the refusal reached Claude as `AttributeError: <unknown>.Count`.
 - Fix: `autocad_mcp/com.py` `describe_attribute_error` and `autocad_mcp/app.py` turn that into the busy message; offline test added; version 0.1.2. The fix was not rerun live.
 - Validation: `scripts/check.ps1` green. Drawing names from Alex's PC are not recorded.
+
+## 2026-11-03: busy message verified live; repository settings
+Writer: Claude Code side session (Alex pasted the Chat's busy reply, then "Lets do 1 next").
+- [[Sources/2026-11-03 Safety check]]: addendum, the 0.1.2 busy message seen live through the Claude desktop app.
+- GitHub: `compatibility` label; `main` protected (pull requests, `check` CI required, no force-push or deletion, admin override kept). Recorded in [[Decisions/Distribution and install]].
+- Validation: settings read back from the GitHub API; `scripts/check.ps1` green.

@@ -23,3 +23,6 @@ Question: do the safety promises in INSTALL.md hold on a live AutoCAD (edit guar
 ## Conclusion
 - **verified:** INSTALL.md's safety promises hold on AutoCAD 2026: user drawings are locked, each action is one Ctrl+Z, and nothing is drawn while the user is in a command or a modal dialog. The refusal while busy comes from AutoCAD rejecting COM calls, before the server's own check.
 - **unresolved:** whether AutoCAD accepts COM calls in states the server's `CMDACTIVE` check would then catch (for example a transparent command or a modeless palette); `plot_pdf` and `capture_view` while busy; the new busy message seen live through an MCP client.
+
+## Addendum 2026-11-03: the busy message seen live (0.1.2)
+- **user-reported 2026-11-03 (reply Alex pasted from a Chat, extension 0.1.2):** with LINE waiting for a point, a request to draw was answered: "AutoCAD is busy and rejected the call, which usually means a command, dialog, or prompt is open. Could you press Esc a couple of times in AutoCAD, or close any open dialog, and let me know?" This **supersedes** "the fix itself was not rerun live" above: through a real MCP client the refusal now reads as the busy message, and Claude asked the user to press Esc instead of retrying.
