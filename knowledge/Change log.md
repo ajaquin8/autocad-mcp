@@ -97,3 +97,10 @@ Writer: Claude Code side session (Alex: "Yes, fix it", after Claude read version
 - `autocad_mcp/session.py`: `RELEASE_YEARS` and `product_name()`; `acad_status` returns `"autocad": "AutoCAD 2026"` plus the raw `autocad_version`, and its description tells Claude to use the first. `scripts/stdio_smoke.py` prints the new name.
 - Version 0.1.1 in `pyproject.toml` and `autocad_mcp/app.py`, with a test that keeps them equal. Updated [[Research/AutoCAD API gotchas]] and the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
 - Validation: three new offline tests; `scripts/check.ps1` green. **Not run against a live AutoCAD** (the mapping is a lookup on the version string already returned live: 25.1 on 2026, 26.0 on 2027).
+
+## 2026-11-03: safety check (AMCP-LIVE-20261103-03) and the busy message (0.1.2)
+Writer: Claude Code side session (Alex: "Okay lets start with 1", then "Saved, go" and the AutoCAD steps between phases).
+- New: `tests/live/safety_check.py` (phased live batch) and [[Sources/2026-11-03 Safety check]]. Updated [[Sources/index]], [[Projects/AutoCAD-MCP/Roadmap]], [[Projects/AutoCAD-MCP/index]], [[Research/AutoCAD API gotchas]], README status.
+- Result on AutoCAD 2026: 41/44. Edit guard, one Ctrl+Z per tool, blocks, edits by handle and open/close passed; nothing was drawn inside LINE or with OPTIONS open, but the refusal reached Claude as `AttributeError: <unknown>.Count`.
+- Fix: `autocad_mcp/com.py` `describe_attribute_error` and `autocad_mcp/app.py` turn that into the busy message; offline test added; version 0.1.2. The fix was not rerun live.
+- Validation: `scripts/check.ps1` green. Drawing names from Alex's PC are not recorded.

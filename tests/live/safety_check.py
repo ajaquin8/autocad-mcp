@@ -190,8 +190,40 @@ def phase_busy(state: dict) -> None:
     check("nothing was drawn while busy", query.query_entities(name=c)["matches"] == count)
 
 
+def phase_busy_armed(state: dict) -> None:
+    """Like the real server: connect and warm up while AutoCAD is idle, then wait for
+    scratch/<report>-go (created when the user is inside a command or dialog) and try to draw."""
+    import time
+
+    c = scratch_drawing(state)
+    count = query.query_entities(name=c)["matches"]
+    documents.acad_status()
+    go = os.path.join(SCRATCH, f"{REPORT}-go")
+    if os.path.exists(go):
+        os.remove(go)
+    print("ARMED: waiting for", go, flush=True)
+    deadline = time.time() + 600
+    while not os.path.exists(go):
+        if time.time() > deadline:
+            check("busy-armed: go signal", False, "timed out waiting")
+            return
+        time.sleep(0.5)
+    os.remove(go)
+    step("draw while the user is busy is refused (warm session)", draw.draw_circle, [10, 10], 1, name=c,
+         expect_error="busy")
+    try:
+        after = query.query_entities(name=c)["matches"]
+        check("nothing was drawn while busy (warm session)", after == count, f"{count} -> {after}")
+    except Exception as err:  # noqa: BLE001 - a rejected read is also an answer; checked again in 'idle'
+        check("count read while busy", True, f"read rejected too ({type(err).__name__}); checked in idle")
+    state["busy_count"] = count
+
+
 def phase_idle(state: dict) -> None:
     c = scratch_drawing(state)
+    if "busy_count" in state:
+        now = query.query_entities(name=c)["matches"]
+        check("nothing was drawn during the busy attempts", now == state["busy_count"], f"{state['busy_count']} -> {now}")
     step("draw after the user is done works again", draw.draw_circle, [10, 10], 1, name=c)
 
 
@@ -204,7 +236,8 @@ def phase_cleanup(state: dict) -> None:
 
 
 PHASES = {"tools": phase_tools, "undo-prepare": phase_undo_prepare, "undo-check": phase_undo_check,
-          "undo-check2": phase_undo_check2, "busy": phase_busy, "idle": phase_idle, "cleanup": phase_cleanup}
+          "undo-check2": phase_undo_check2, "busy": phase_busy, "busy-armed": phase_busy_armed,
+          "idle": phase_idle, "cleanup": phase_cleanup}
 
 
 def main() -> int:

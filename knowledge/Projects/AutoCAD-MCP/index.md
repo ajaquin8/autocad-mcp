@@ -29,6 +29,9 @@ An MCP server that lets Claude drive the AutoCAD 2027 session already running on
 ## 2026-11-03: public
 - **verified 2026-11-03:** public at https://github.com/ajaquin8/autocad-mcp (fresh one-commit history). The full development history stays in the private `ajaquin8/autocad-mcp-dev`. See [[Decisions/Distribution and install]].
 
+## 2026-11-03: safety check
+- **verified** ([[Sources/2026-11-03 Safety check]]): on AutoCAD 2026, user drawings stay locked (draw and close refused), each tool is one Ctrl+Z, nothing is drawn while the user is inside a command or a modal dialog, and blocks/attributes, move/change/delete by handle and save/close/open work. The busy refusal showed a confusing `AttributeError: <unknown>.Count`; now reported as "busy, press Esc" (0.1.2). This answers the first two open questions below (**superseded**).
+
 ## History
 - 2026-10-29: Alex compared the existing AutoCAD MCP servers ([[Research/AutoCAD MCP landscape]]) and chose to build one in the style of inventor-mcp.
 

@@ -10,6 +10,7 @@ import time
 import pytest
 import pywintypes
 from conftest import FakeDoc
+from mcp.server.mcpserver.exceptions import ToolError
 
 from autocad_mcp import com
 from autocad_mcp import session as session_module
@@ -58,6 +59,18 @@ def _com_error(hresult, scode=0):
 
 def test_busy_autocad_gets_an_actionable_message():
     assert "busy" in com.describe_com_error(_com_error(-2147418111))
+
+
+def test_rejected_lookup_while_busy_gets_the_busy_message(monkeypatch):
+    # Live 2026-11-03: inside LINE or with OPTIONS open, pywin32 raised AttributeError('<unknown>.Count').
+    def rejected():
+        raise AttributeError("<unknown>.Count")
+
+    monkeypatch.setattr(session, "documents", rejected)
+    with pytest.raises(ToolError, match="busy and rejected the call.*press Esc"):
+        asyncio.run(mcp.call_tool("list_documents", {}))
+    assert com.describe_attribute_error(AttributeError("'NoneType' object has no attribute 'x'")).startswith(
+        "AttributeError: ")
 
 
 def test_lost_connection_message():

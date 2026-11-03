@@ -5,6 +5,8 @@ Status: **proposed** (Claude, 2026-10-29). Alex sets the priorities.
 ## Now: first live verification
 **2026-10-29:** steps 1, 2, 4 and 7 (except `close_document`) passed, see [[Sources/2026-10-29 First drawing]]. Still to do: 3 (Ctrl+Z), 5 (busy guard with Alex), 6 (blocks, move, change, delete). New item: dimensions need a dimension scale or style to be readable. **Done 2026-10-29** with `set_drawing_variables`, see [[Sources/2026-10-29 Kitchen plan]].
 
+**2026-11-03:** steps 3, 5 and 6, plus `close_document`, passed on AutoCAD 2026, see [[Sources/2026-11-03 Safety check]]. The busy guard holds because AutoCAD rejects COM calls during a command or dialog; the message for that case was fixed. All seven steps are now done.
+
 Run under [[Decisions/Live test protocol]], in a scratch drawing created by the server:
 1. `acad_status` (read-only) with Alex's drawings open: are they all reported locked?
 2. `new_drawing`, `add_layer`, one of each `draw_*`, `add_text`, `add_mtext`, `add_dimension`, `capture_view`.

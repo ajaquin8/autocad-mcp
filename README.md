@@ -71,8 +71,8 @@ after you agree (see
 
 See [knowledge/Projects/AutoCAD-MCP/index.md](knowledge/Projects/AutoCAD-MCP/index.md).
 In short (2026-11-03): drawing, layers, dimensions, view capture and PDF plotting are verified
-against a live AutoCAD 2027 (2026-10-29); blocks, open/close and the busy guard during a user command
-are not live-tested yet.
+against live AutoCAD 2027 and 2026; on 2026 also blocks and attributes, edits by handle, open/close,
+one Ctrl+Z per tool, and edits being refused while you are in a command or dialog.
 
 ## Contributing
 

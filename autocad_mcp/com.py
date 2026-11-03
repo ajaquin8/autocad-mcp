@@ -79,6 +79,19 @@ def rounded(values: Sequence[float], places: int = 6) -> list[float]:
 # ---------- errors ----------
 
 
+BUSY_MESSAGE = ("AutoCAD is busy and rejected the call (a command, dialog or prompt is probably "
+                "open). Ask the user to finish it or press Esc, then retry.")
+
+
+def describe_attribute_error(err: AttributeError) -> str:
+    """pywin32's late binding looks each member up by name, and AutoCAD rejects that lookup
+    while the user is in a command or dialog; pywin32 then raises AttributeError('<unknown>.Count')
+    instead of a COM error (verified live 2026-11-03, inside LINE and with OPTIONS open)."""
+    if str(err).startswith("<unknown>."):
+        return f"{BUSY_MESSAGE} (AutoCAD did not answer the lookup of {str(err)[len('<unknown>.'):]})"
+    return f"AttributeError: {err}"
+
+
 def describe_com_error(err: pywintypes.com_error) -> str:
     hresult = err.args[0] if err.args else None
     detail = ""
@@ -91,8 +104,7 @@ def describe_com_error(err: pywintypes.com_error) -> str:
                      0x80004001: "not implemented", 0x8000FFFF: "unexpected failure"}
             detail = (detail + " " if detail else "") + f"(0x{scode:08X} {known.get(scode, '')})".replace(" )", ")")
     if hresult in RPC_BUSY_CODES:
-        return ("AutoCAD is busy and rejected the call (a command, dialog or prompt is probably "
-                "open). Ask the user to finish it or press Esc, then retry.")
+        return BUSY_MESSAGE
     if hresult in RPC_GONE_CODES:
         return "Lost the connection to AutoCAD (was it closed?). Call acad_status to reconnect."
     msg = err.args[1] if len(err.args) > 1 else str(err)
