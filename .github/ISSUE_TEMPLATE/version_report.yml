@@ -1,0 +1,35 @@
+name: Works on my AutoCAD
+description: Tell us whether it works on your AutoCAD version or vertical.
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        So far autocad-mcp is tested on AutoCAD 2026 and 2027. Reports from other versions and
+        verticals help everyone. Please don't attach drawings or company files.
+  - type: input
+    id: autocad
+    attributes:
+      label: AutoCAD product and version
+      placeholder: "AutoCAD Architecture 2025"
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Did "Call acad_status" work?
+      options: ["Yes", "No, it gave an error", "It found the wrong program (for example DWG TrueView)"]
+    validations:
+      required: true
+  - type: dropdown
+    id: drawing
+    attributes:
+      label: Did a simple new drawing work (lines, a circle, a dimension, a screenshot)?
+      options: ["Yes, all of it", "Partly", "No", "Didn't try"]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything that failed, with the error text. Which Claude app you used.

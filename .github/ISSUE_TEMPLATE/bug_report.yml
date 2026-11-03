@@ -1,0 +1,46 @@
+name: Bug report
+description: Something went wrong when Claude used AutoCAD.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please don't attach drawings, PDFs, screenshots of client work, or company file names.**
+        Describe the problem in words, or with a small drawing you made just for this.
+  - type: textarea
+    id: asked
+    attributes:
+      label: What you asked Claude
+      placeholder: "Draw a 1000 x 600 rectangle in a new drawing and dimension it."
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: Claude's answer or the error message (copy the text).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: input
+    id: autocad
+    attributes:
+      label: AutoCAD version
+      placeholder: "AutoCAD 2026, or Civil 3D 2025"
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Claude app
+      options: [Claude desktop app (bundle), Claude desktop app (config file), Claude Code, Other]
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11"

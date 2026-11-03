@@ -1,0 +1,59 @@
+[project]
+name = "autocad-mcp"
+version = "0.1.0"
+description = "MCP server that drives a running Autodesk AutoCAD session over COM"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: Editors :: Vector-Based",
+]
+dependencies = [
+    "mcp[cli]>=2.3,<3",
+    "pywin32>=306",
+    "Pillow>=10",
+]
+
+[project.urls]
+Homepage = "https://github.com/ajaquin8/autocad-mcp"
+Install = "https://github.com/ajaquin8/autocad-mcp/blob/main/INSTALL.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+autocad-mcp = "autocad_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=77"]  # SPDX licence expression
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["autocad_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/live talks to a running AutoCAD and is never collected automatically.
+norecursedirs = ["live"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["scratch"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = [
+    "B008",  # tool defaults are plain values
+    "E731",  # small lambdas are used for formatting helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Live scripts are mostly tool-argument dictionaries; long lines read better than wrapped ones.
+"tests/live/*.py" = ["E501"]

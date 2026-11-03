@@ -1,0 +1,42 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Built bundles and wheels (scripts/build_mcpb.py)
+/dist/
+/build/
+
+# Live-test output (screenshots, scratch CAD files)
+/scratch/
+
+# Never commit CAD, drawings or company or customer material
+*.dwg
+*.dwt
+*.dxf
+*.dws
+*.bak
+*.sv$
+*.dwl
+*.dwl2
+*.plt
+*.step
+*.stp
+*.stl
+*.pdf
+*.xlsx
+*.xls
+
+# Obsidian: per-machine layout and trash (settings are shared)
+knowledge/.obsidian/workspace*.json
+knowledge/.obsidian/cache
+knowledge/.trash/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
