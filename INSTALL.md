@@ -2,8 +2,8 @@
 
 autocad-mcp lets Claude work in the AutoCAD that is already open on your PC: it can draw lines,
 polylines, arcs, circles, text, dimensions and blocks, make layers, look up what is in a drawing,
-take a picture of the view and plot to PDF. You don't need to know any programming. You do
-two things: install a small helper called **uv**, and tell Claude about the server.
+take a picture of the view and plot to PDF. You don't need to know any programming. In the Claude desktop app it is
+one click; Claude Code needs one extra helper (uv).
 
 ## Will it work on my PC?
 
@@ -19,12 +19,32 @@ two things: install a small helper called **uv**, and tell Claude about the serv
 The server finds whichever AutoCAD release is installed, so older releases (2025, 2024 ...) should
 work too but have not been tried. If you try another version, please report it with the "Works on my AutoCAD" issue form.
 
-You also need Claude: the **Claude desktop app** or **Claude Code**.
+You also need Claude on that PC: the **Claude desktop app** (Chat or Cowork) or **Claude Code**.
 
-## Step 1: install uv (once)
+## Step 1: add the server to Claude
 
-uv downloads the right Python and the server's parts for you, so you don't need to install Python.
-Open **PowerShell** (Start menu, type `PowerShell`) and paste:
+### Claude desktop app (Chat and Cowork): one-click bundle
+
+Nothing else to install: the Claude desktop app sets up Python and the server's parts by itself.
+
+1. Download `autocad-mcp-<version>.mcpb` from the
+   [Releases page](https://github.com/ajaquin8/autocad-mcp/releases) (it is under **Assets**, below
+   the release notes).
+2. Double-click it (or drag it onto Claude's **Settings → Extensions** page) and choose **Install**.
+   Claude warns that the extension is not signed by a known publisher; that is expected for a
+   hobby project.
+3. *AutoCAD* now shows on the Extensions page. The first start can take a minute while it
+   downloads the server's parts.
+
+One install covers both Chat and Cowork. This needs a recent Claude desktop app (the bundle uses
+the newer "uv" bundle format). If your Claude is managed by your company, the admin may have
+switched off extensions; ask them, or use Claude Code.
+
+### Claude Code
+
+Claude Code needs a small helper called **uv**, which downloads the right Python and the server's
+parts, so you don't need to install Python. Open **PowerShell** (Start menu, type `PowerShell`)
+and paste:
 
 ```powershell
 winget install --id=astral-sh.uv -e
@@ -36,25 +56,20 @@ If `winget` is not found, use uv's own installer instead:
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Then **close PowerShell and quit Claude completely** (also from the system tray), so both pick up the
-new `uv` command.
+Close PowerShell, open a new one, and add the server for all your projects:
 
-## Step 2: add the server to Claude
+```powershell
+claude mcp add autocad --scope user -- uvx --from https://github.com/ajaquin8/autocad-mcp/archive/refs/heads/main.zip autocad-mcp
+```
 
-### Claude desktop app: one-click bundle
+The first start downloads Python and the server's parts and can take a minute. If Claude reports
+that `autocad` failed to start, wait a moment and restart Claude.
 
-1. Download `autocad-mcp-<version>.mcpb` from the
-   [Releases page](https://github.com/ajaquin8/autocad-mcp/releases).
-2. Double-click it (or drag it onto Claude's **Settings → Extensions** page) and choose **Install**.
-   Claude warns that the extension is not signed by a known publisher; that is expected for a
-   hobby project.
-3. The first start downloads Python and the server's parts (about 60 MB) and can take a minute.
+### If the bundle won't install
 
-This needs a recent Claude desktop app: the bundle uses the newer "uv" bundle format.
-
-If the bundle won't install, use the manual way: in Claude go to **Settings → Developer → Edit
-Config**, and put this in `claude_desktop_config.json` (merge it with anything already there), then
-restart Claude:
+Install uv as in the Claude Code part above, then in the Claude desktop app go to **Settings →
+Developer → Edit Config** and put this in `claude_desktop_config.json` (merge it with anything
+already there), then quit Claude completely (also from the system tray) and start it again:
 
 ```json
 {
@@ -67,21 +82,10 @@ restart Claude:
 }
 ```
 
-### Claude Code
-
-Run this once in PowerShell. It adds the server for all your projects:
-
-```powershell
-claude mcp add autocad --scope user -- uvx --from https://github.com/ajaquin8/autocad-mcp/archive/refs/heads/main.zip autocad-mcp
-```
-
-The first start downloads Python and the server's parts and can take a minute. If Claude reports
-that `autocad` failed to start, wait a moment and restart Claude.
-
-## Step 3: try it
+## Step 2: try it
 
 1. Start AutoCAD and open a drawing (or leave the blank start drawing).
-2. In Claude, ask: **"Call acad_status and tell me what you see."**
+2. In Claude (a Chat, a Cowork task or Claude Code), ask: **"Call acad_status and tell me what you see."**
 
 Claude should report your AutoCAD version, the open drawings (all shown as locked) and the drawing
 units. Then try something small: *"Make a new drawing and draw a 1000 x 600 rectangle with a
@@ -103,26 +107,22 @@ circle in the middle, then show me a screenshot."*
 
 ## Updating
 
-The server is downloaded once and then reused. To get the newest version, quit Claude, run
-
-```powershell
-uv cache clean autocad-mcp
-```
-
-and start Claude again (desktop bundle users: install the new `.mcpb` from the Releases page instead).
+- Claude desktop app: download the newest `.mcpb` from the Releases page and install it the same way.
+- Claude Code: the server is downloaded once and then reused. To get the newest version, quit
+  Claude, run `uv cache clean autocad-mcp` in PowerShell, and start Claude again.
 
 ## Removing it
 
 - Claude desktop app: **Settings → Extensions**, remove *AutoCAD* (or delete the `autocad` entry from
   the config file).
 - Claude Code: `claude mcp remove autocad --scope user`.
-- Optional: `uv cache clean` frees the downloaded parts, and `winget uninstall astral-sh.uv` removes uv.
+- Claude Code users, optional: `uv cache clean` frees the downloaded parts, and `winget uninstall astral-sh.uv` removes uv.
 
 ## Problems?
 
 - **"AutoCAD is not running"**: start AutoCAD first. The server attaches to the AutoCAD that is open.
 - **It finds DWG TrueView instead of AutoCAD**: start full AutoCAD; TrueView can't be drawn in.
-- **`uvx` or `uv` is not recognized**: quit and restart Claude (and PowerShell) after installing uv.
+- **`uvx` or `uv` is not recognized** (Claude Code or the config file): quit and restart Claude (and PowerShell) after installing uv.
 - **Edits are refused as "busy"**: press Esc in AutoCAD to leave the current command, close any
   dialog box, then ask again.
 - Anything else: open an issue on [GitHub](https://github.com/ajaquin8/autocad-mcp/issues) with what you
