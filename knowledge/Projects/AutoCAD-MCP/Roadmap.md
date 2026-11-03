@@ -19,8 +19,8 @@ Run under [[Decisions/Live test protocol]], in a scratch drawing created by the 
 Record the run in [[Sources/index]] and the lessons in [[Research/AutoCAD API gotchas]].
 
 ## Next: make it fit Alex's work
-- Paper space: layouts, viewports, title block attributes.
-- Hatches, leaders/multileaders, dimension styles and text styles.
+- Paper space: layouts, viewports, title block attributes. **Done 2026-11-03** (viewports, layouts, title blocks by handle), see [[Sources/2026-11-03 Sheet tools]]. Still open: creating layouts, scales other than 1:1 for leaders.
+- Hatches, leaders/multileaders, dimension styles and text styles. **Leaders and making existing styles current done 2026-11-03**; hatches and creating styles still open.
 - A modelling workflow skill or MCP prompt, as planned for inventor-mcp.
 - Optionally pair with Autodesk's built-in server for queries (it needs workarounds to reach Claude Code; see [[Research/AutoCAD MCP landscape]]).
 

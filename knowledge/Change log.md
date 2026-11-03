@@ -115,3 +115,17 @@ Writer: Claude Code side session (Alex pasted the Chat's busy reply, then "Lets 
 - [[Sources/2026-11-03 Safety check]]: addendum, the 0.1.2 busy message seen live through the Claude desktop app.
 - GitHub: `compatibility` label; `main` protected (pull requests, `check` CI required, no force-push or deletion, admin override kept). Recorded in [[Decisions/Distribution and install]].
 - Validation: settings read back from the GitHub API; `scripts/check.ps1` green.
+
+## 2026-11-03: sheet tools (0.1.3)
+Writer: Claude Code side session (Alex: "Fab part drawings", then chose the sketch sheet, the angle-stop benchmark and a private playbook; "Saved, go").
+- New tools: `add_viewport`, `list_layouts` (new module `tools/sheets.py`), `add_leader`, `add_radial_dimension`, `draw_center_mark`, `set_current_styles`; `query_entities` takes a `layout`. Fakes and seven offline tests added. Version 0.1.3; README tool list.
+- Live: [[Sources/2026-11-03 Sheet tools]] (39/39). Lessons in [[Research/AutoCAD API gotchas]]; updated [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]], [[Sources/index]].
+- The company-specific playbook and the sheet template are private (outside this repository) by Alex's decision.
+- Validation: `scripts/check.ps1` green.
+
+## 2026-11-03: decimal separator and plot style re-plot
+Writer: Claude Code side session (Alex: "Yes, install it", "Saved, go", "Yes, add to PR #7").
+- Live: [[Sources/2026-11-03 Plot style re-plot]] (8/8) after the user's plot style table was installed outside this repository. Lessons in [[Research/AutoCAD API gotchas]]; [[Sources/index]] updated.
+- Correction in [[Sources/2026-11-03 Sheet tools]]: the decimal dimensions printed with a comma, not `1.00`.
+- `set_drawing_variables` accepts DIMDSEP ("." or ","), with an offline test. Not live-verified.
+- Validation: `scripts/check.ps1` green.

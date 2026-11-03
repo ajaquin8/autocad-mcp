@@ -9,7 +9,7 @@ import time
 
 import pytest
 import pywintypes
-from conftest import FakeDoc
+from conftest import FakeDoc, FakeEntity
 from mcp.server.mcpserver.exceptions import ToolError
 
 from autocad_mcp import com
@@ -18,7 +18,7 @@ from autocad_mcp.app import _render, _where
 from autocad_mcp.com import AcadError, AcadTimeout, ComWorker, deg, rad, xyz
 from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
-from autocad_mcp.tools import documents, draw, edit, entities, layers, settings
+from autocad_mcp.tools import annotate, documents, draw, edit, entities, layers, query, settings, sheets
 
 # ---------- coordinates ----------
 
@@ -337,6 +337,16 @@ def test_drawing_variables_are_set_and_validated(fake_app):
         settings.set_drawing_variables({"DIMLUNIT": 9})
 
 
+def test_decimal_separator_takes_a_point_or_a_comma(fake_app):
+    session.mark_owned(fake_app.doc)
+    fake_app.doc.variables["DIMDSEP"] = ","  # a style made for metric drawings
+    result = settings.set_drawing_variables({"DIMLUNIT": 2, "dimdsep": "."})
+    assert result["DIMDSEP"] == "." and result["dimension_style_updated"] == "Standard"
+    with pytest.raises(AcadError, match="'.' or ','"):
+        settings.set_drawing_variables({"DIMDSEP": ";"})
+    assert fake_app.doc.variables["DIMDSEP"] == "."
+
+
 def test_failed_variable_change_restores_the_earlier_ones(fake_app, monkeypatch):
     session.mark_owned(fake_app.doc)
     fake_app.doc.variables["DIMSCALE"] = 1.0
@@ -391,3 +401,82 @@ def test_every_tool_has_a_description_and_mutating_tools_are_marked():
     read_only = {t.name for t in tools if t.annotations and t.annotations.read_only_hint}
     assert {"acad_status", "query_entities", "get_entity", "capture_view"} <= read_only
     assert not {"draw_line", "delete_entities", "save_document"} & read_only
+
+
+# ---------- leaders, radial dimensions, centre marks ----------
+
+
+def test_leader_points_and_text(fake_app):
+    session.mark_owned(fake_app.doc)
+    info = annotate.add_leader([[1, 2], [2, 3], [4, 3]], "1/4\" DIA THRU, 4 PLACES")
+    leader = fake_app.doc.HandleToObject(info["handle"])
+    assert leader.points == [(1, 2, 0), (2, 3, 0), (4, 3, 0)] and info["text"] == "1/4\" DIA THRU, 4 PLACES"
+    with pytest.raises(AcadError, match="two or three points"):
+        annotate.add_leader([[1, 2]], "x")
+
+
+def test_diameter_runs_through_the_centre_and_radius_uses_it(fake_app):
+    session.mark_owned(fake_app.doc)
+    dia = fake_app.doc.HandleToObject(annotate.add_radial_dimension([5, 5], [6, 5], text_override="<> THRU")["handle"])
+    assert dia.chord == (6, 5, 0) and dia.far == (4, 5, 0) and dia.TextOverride == "<> THRU"
+    rad_dim = fake_app.doc.HandleToObject(annotate.add_radial_dimension([5, 5], [5, 7], kind="radius")["handle"])
+    assert rad_dim.center == (5, 5, 0) and rad_dim.chord == (5, 7, 0)
+    with pytest.raises(AcadError, match="not at the centre"):
+        annotate.add_radial_dimension([5, 5], [5, 5])
+
+
+def test_center_mark_is_two_lines_in_one_undo_step(fake_app):
+    session.mark_owned(fake_app.doc)
+    info = draw.draw_center_mark([2, 3], 0.125, extension=0.0625)
+    across, upright = (fake_app.doc.HandleToObject(h) for h in info["handles"])
+    assert across.StartPoint == (1.8125, 3, 0) and across.EndPoint == (2.1875, 3, 0)
+    assert upright.StartPoint == (2, 2.8125, 0) and upright.EndPoint == (2, 3.1875, 0)
+    assert fake_app.doc.undo_log == ["start", "end"]
+
+
+# ---------- sheets and viewports ----------
+
+
+def test_list_layouts_in_tab_order_with_title_block_handles(fake_app):
+    ref = fake_app.doc.paper._add(FakeEntity(fake_app.doc, "AcDbBlockReference", EffectiveName="TITLE-BLOCK"))
+    layouts = sheets.list_layouts()
+    assert [lay["name"] for lay in layouts] == ["Model", "Sheet1"]
+    assert layouts[1]["blocks"] == [{"handle": ref.Handle, "name": "TITLE-BLOCK"}]
+    assert query.query_entities(layout="sheet1")["matches"] == 1
+    with pytest.raises(AcadError, match="Layouts: Sheet1, Model"):
+        query.query_entities(layout="A-101")
+
+
+def test_viewport_frames_the_model_area_at_the_exact_scale(fake_app):
+    session.mark_owned(fake_app.doc)
+    fake_app.doc.ActiveLayout = fake_app.doc.Layouts.Item(1)  # the user was on Model
+    info = sheets.add_viewport("Sheet1", [1, 1], [9, 7], view_center=[50, 20], scale=0.5)
+    vp = fake_app.doc.HandleToObject(info["handle"])
+    assert vp.Center == (5, 4, 0) and (vp.Width, vp.Height) == (8, 6) and vp.displayed
+    assert fake_app.zoomed == ((42, 14, 0), (58, 26, 0), True)  # 8 x 6 paper at 1:2 shows 16 x 12 model
+    assert (vp.StandardScale, vp.CustomScale, vp.DisplayLocked) == (1, 0.5, True)
+    assert fake_app.doc.MSpace is False and fake_app.doc.ActiveLayout.Name == "Sheet1"
+    assert info["layout"] == "Sheet1" and fake_app.doc.undo_log == ["start", "end"]
+
+
+def test_viewport_refuses_model_locked_drawings_and_rolls_back(fake_app):
+    with pytest.raises(AcadError, match="is locked"):
+        sheets.add_viewport("Sheet1", [0, 0], [1, 1], [0, 0], 1)
+    session.mark_owned(fake_app.doc)
+    with pytest.raises(AcadError, match="not Model"):
+        sheets.add_viewport("Model", [0, 0], [1, 1], [0, 0], 1)
+    fake_app.doc.ActiveLayout = fake_app.doc.Layouts.Item(1)
+    with pytest.raises(AcadError, match="No layer named"):
+        sheets.add_viewport("Sheet1", [0, 0], [4, 3], [0, 0], 1, layer="NOPE")
+    assert fake_app.doc.paper.items == [] and fake_app.doc.ActiveLayout.Name == "Model"
+
+
+def test_current_styles_switch_and_roll_back(fake_app):
+    session.mark_owned(fake_app.doc)
+    out = settings.set_current_styles(dimension_style="arch-dim", multileader_style="NOTES")
+    assert out == {"dimension_style": "ARCH-DIM", "multileader_style": "NOTES"}
+    assert fake_app.doc.ActiveDimStyle.Name == "ARCH-DIM" and fake_app.doc.variables["CMLEADERSTYLE"] == "NOTES"
+    with pytest.raises(AcadError, match="The drawing has: Standard, NOTES-TEXT"):
+        settings.set_current_styles(multileader_style="Standard", text_style="Arial")
+    assert fake_app.doc.variables["CMLEADERSTYLE"] == "NOTES"  # nothing half-done
+

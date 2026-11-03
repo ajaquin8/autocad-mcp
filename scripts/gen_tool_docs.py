@@ -18,7 +18,8 @@ from autocad_mcp.server import mcp  # noqa: E402
 PAGE = os.path.join(ROOT, "knowledge", "Projects", "AutoCAD-MCP", "Tool reference.md")
 GROUPS = {
     "documents": "Session and drawings", "query": "Inspect", "layers": "Layers", "draw": "Draw",
-    "annotate": "Dimensions", "blocks": "Blocks", "edit": "Edit", "plot": "Plot", "settings": "Drawing settings",
+    "annotate": "Dimensions and leaders", "blocks": "Blocks", "edit": "Edit", "plot": "Plot",
+    "settings": "Drawing settings", "sheets": "Sheets and viewports",
     "power": "Command line (opt-in)",
 }
 
