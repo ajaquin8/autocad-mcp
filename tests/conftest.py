@@ -165,6 +165,27 @@ class FakeLinetypes:
         self.names.add(name.lower())
 
 
+class FakeNamed:
+    """A named collection (DimStyles, TextStyles) or dictionary of styles."""
+
+    class Style:
+        def __init__(self, name: str) -> None:
+            self.Name = name
+
+    def __init__(self, items: list) -> None:
+        self.items = items
+
+    @property
+    def Count(self) -> int:  # noqa: N802
+        return len(self.items)
+
+    def Item(self, i: int):  # noqa: N802
+        return self.items[i]
+
+    def GetName(self, obj) -> str:  # noqa: N802
+        return obj.Name
+
+
 class FakeDoc:
     def __init__(self, name: str = "Drawing1.dwg", full_name: str = "") -> None:
         self.Name, self.FullName = name, full_name
@@ -188,6 +209,16 @@ class FakeDoc:
             def CopyFrom(self, source) -> None:  # noqa: N802
                 doc.undo_log.append(f"style DIMSCALE={source.variables.get('DIMSCALE')}")
         self.ActiveDimStyle = _DimStyle()
+        self.DimStyles = FakeNamed([self.ActiveDimStyle, FakeNamed.Style("WAG-ARCH")])
+        self.TextStyles = FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("WAG-ANNO")])
+        self.ActiveTextStyle = self.TextStyles.Item(0)
+        self.variables["CMLEADERSTYLE"] = "Standard"
+
+        class _Dictionaries:
+            def Item(self, key: str):  # noqa: N802
+                assert key == "ACAD_MLEADERSTYLE"
+                return FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("WAG-STD")])
+        self.Dictionaries = _Dictionaries()
 
     def Regen(self, which: int) -> None:  # noqa: N802
         self.undo_log.append("regen")

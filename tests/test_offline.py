@@ -459,3 +459,14 @@ def test_viewport_refuses_model_locked_drawings_and_rolls_back(fake_app):
     with pytest.raises(AcadError, match="No layer named"):
         sheets.add_viewport("Sheet1", [0, 0], [4, 3], [0, 0], 1, layer="NOPE")
     assert fake_app.doc.paper.items == [] and fake_app.doc.ActiveLayout.Name == "Model"
+
+
+def test_current_styles_switch_and_roll_back(fake_app):
+    session.mark_owned(fake_app.doc)
+    out = settings.set_current_styles(dimension_style="wag-arch", multileader_style="WAG-STD")
+    assert out == {"dimension_style": "WAG-ARCH", "multileader_style": "WAG-STD"}
+    assert fake_app.doc.ActiveDimStyle.Name == "WAG-ARCH" and fake_app.doc.variables["CMLEADERSTYLE"] == "WAG-STD"
+    with pytest.raises(AcadError, match="The drawing has: Standard, WAG-ANNO"):
+        settings.set_current_styles(multileader_style="Standard", text_style="Arial")
+    assert fake_app.doc.variables["CMLEADERSTYLE"] == "WAG-STD"  # nothing half-done
+
