@@ -82,6 +82,11 @@ def details(ent: Any) -> dict:
     elif kind == "AcDbMText":
         info.update(text=str(ent.TextString), position=rounded(ent.InsertionPoint), width=ent.Width,
                     height=ent.Height, style=str(ent.StyleName))
+    elif kind == "AcDbMLeader":
+        info["text"] = str(ent.TextString)
+    elif kind == "AcDbViewport":
+        info.update(center=rounded(ent.Center), width=round(ent.Width, 6), height=round(ent.Height, 6),
+                    scale=round(ent.CustomScale, 9), locked=bool(ent.DisplayLocked))
     elif kind == "AcDbBlockReference":
         info.update(name=str(ent.Name), effective_name=str(ent.EffectiveName),
                     position=rounded(ent.InsertionPoint), rotation=round(deg(ent.Rotation), 6),
@@ -90,3 +95,20 @@ def details(ent: Any) -> dict:
     elif "Dimension" in kind:
         info.update(measurement=round(ent.Measurement, 6), text_override=str(ent.TextOverride))
     return info
+
+
+def find_layout(doc: Any, name: str) -> Any:
+    """The layout with this name (case-insensitive), or an error that lists the ones there are."""
+    layouts = [doc.Layouts.Item(i) for i in range(doc.Layouts.Count)]
+    for layout in layouts:
+        if str(layout.Name).lower() == name.strip().lower():
+            return layout
+    raise AcadError(f"No layout named '{name}' in '{doc.Name}'. Layouts: "
+                    f"{', '.join(str(lay.Name) for lay in layouts)}.")
+
+
+def layout_space(doc: Any, layout: str) -> Iterator[Any]:
+    """The entities on one layout (its paper space), like model_space for model space."""
+    block = find_layout(doc, layout).Block
+    for i in range(block.Count):
+        yield block.Item(i)

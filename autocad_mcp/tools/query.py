@@ -15,7 +15,7 @@ from PIL import Image as PILImage
 from ..app import acad_tool
 from ..com import AcadError, rounded
 from ..session import session
-from .entities import by_handle, details, model_space, summary
+from .entities import by_handle, details, layout_space, model_space, summary
 
 SCAN_LIMIT = 50_000  # entities read per call before stopping, so a huge drawing cannot hang a call
 PW_RENDERFULLCONTENT = 2
@@ -58,9 +58,10 @@ def drawing_info(name: str = "") -> dict:
 
 @acad_tool(read_only=True)
 def query_entities(object_type: str = "", layer: str = "", limit: int = 100, offset: int = 0,
-                   name: str = "") -> dict:
-    """Find model space entities by type and/or layer. Returns handle, type, layer and
-    bounding box; use get_entity for full details.
+                   layout: str = "", name: str = "") -> dict:
+    """Find entities by type and/or layer, in model space or on one layout (paper space, where
+    title blocks and viewports live). Returns handle, type, layer and bounding box; use
+    get_entity for full details.
 
     Args:
         object_type: part of the AutoCAD type name, case-insensitive, e.g. "Line" (matches
@@ -68,13 +69,14 @@ def query_entities(object_type: str = "", layer: str = "", limit: int = 100, off
         layer: exact layer name, case-insensitive.
         limit: max results (1-500).
         offset: skip this many matches (paging).
+        layout: a layout name (see list_layouts) to search its paper space instead of model space.
         name: which open drawing (default: active).
     """
     limit = max(1, min(int(limit), 500))
     doc = session.document(name)
     kind, lay = object_type.lower(), layer.lower()
     matches, results, scanned = 0, [], 0
-    for ent in model_space(doc):
+    for ent in (layout_space(doc, layout) if layout else model_space(doc)):
         scanned += 1
         if scanned > SCAN_LIMIT:
             break

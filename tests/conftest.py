@@ -37,7 +37,7 @@ class FakeEntity:
 
     def Delete(self) -> None:  # noqa: N802
         self.deleted = True
-        self._doc.space.items.remove(self)
+        (getattr(self, "_space", None) or self._doc.space).items.remove(self)
 
     def Move(self, origin, target) -> None:  # noqa: N802
         self.moved = (_xyz(origin), _xyz(target))
@@ -60,6 +60,7 @@ class FakeSpace:
     def _add(self, ent: FakeEntity) -> FakeEntity:
         if self.doc.fail_next_add:
             raise RuntimeError("AutoCAD refused")
+        ent._space = self
         self.items.append(ent)
         return ent
 
@@ -70,6 +71,49 @@ class FakeSpace:
 
     def AddCircle(self, center, radius):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbCircle", Center=_xyz(center), Radius=radius))
+
+    def AddMLeader(self, points, index):  # noqa: N802
+        flat = list(_xyz(points))
+        triples = [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
+        return self._add(FakeEntity(self.doc, "AcDbMLeader", points=triples, TextString="")), index
+
+    def AddDimDiametric(self, chord, far_chord, leader_length):  # noqa: N802
+        return self._add(FakeEntity(self.doc, "AcDbDiametricDimension", chord=_xyz(chord), far=_xyz(far_chord),
+                                    leader=leader_length, TextOverride="",
+                                    Measurement=math.dist(_xyz(chord), _xyz(far_chord))))
+
+    def AddDimRadial(self, center, chord, leader_length):  # noqa: N802
+        return self._add(FakeEntity(self.doc, "AcDbRadialDimension", center=_xyz(center), chord=_xyz(chord),
+                                    leader=leader_length, TextOverride="",
+                                    Measurement=math.dist(_xyz(center), _xyz(chord))))
+
+    def AddPViewport(self, center, width, height):  # noqa: N802
+        if self.doc.ActiveLayout.ModelType:
+            raise RuntimeError("paper space is not active")
+        return self._add(FakeViewport(self.doc, "AcDbViewport", Center=_xyz(center), Width=width, Height=height,
+                                      StandardScale=0, CustomScale=1.0, DisplayLocked=False, displayed=False))
+
+
+class FakeViewport(FakeEntity):
+    def Display(self, on: bool) -> None:  # noqa: N802
+        self.displayed = on
+
+
+class FakeLayout:
+    def __init__(self, name: str, tab_order: int, block: FakeSpace, model: bool = False) -> None:
+        self.Name, self.TabOrder, self.Block, self.ModelType = name, tab_order, block, model
+
+
+class FakeLayouts:
+    def __init__(self, layouts: list[FakeLayout]) -> None:
+        self.items = layouts
+
+    @property
+    def Count(self) -> int:  # noqa: N802
+        return len(self.items)
+
+    def Item(self, i: int) -> FakeLayout:  # noqa: N802
+        return self.items[i]
 
 
 class FakeLayer:
@@ -132,6 +176,10 @@ class FakeDoc:
         self.Layers = FakeLayers()
         self.Linetypes = FakeLinetypes()
         self.ActiveLayer = self.Layers.Item("0")
+        self.paper = FakeSpace(self)
+        self.Layouts = FakeLayouts([FakeLayout("Sheet1", 1, self.paper), FakeLayout("Model", 0, self.space, True)])
+        self.ActiveLayout = self.Layouts.Item(1)
+        self.MSpace, self.ActivePViewport = False, None
         doc = self
 
         class _DimStyle:
@@ -147,6 +195,10 @@ class FakeDoc:
     @property
     def ModelSpace(self):  # noqa: N802
         return self.space
+
+    @property
+    def PaperSpace(self):  # noqa: N802
+        return self.ActiveLayout.Block
 
     def GetVariable(self, name: str):  # noqa: N802
         return self.variables.get(name, 1.0)
@@ -164,7 +216,7 @@ class FakeDoc:
 
     def HandleToObject(self, handle: str):  # noqa: N802
         import pywintypes
-        for ent in self.space.items:
+        for ent in self.space.items + self.paper.items:
             if ent.Handle == handle:
                 return ent
         raise pywintypes.com_error(-2145386484, "Unknown handle", None, None)
@@ -204,6 +256,9 @@ class FakeApp:
     def ActiveDocument(self):  # noqa: N802
         return self.Documents.docs[0]
 
+    def ZoomWindow(self, lower_left, upper_right) -> None:  # noqa: N802
+        self.zoomed = (_xyz(lower_left), _xyz(upper_right), self.ActiveDocument.MSpace)
+
     def GetAcadState(self):  # noqa: N802
         class _State:
             IsQuiescent = self.quiescent
@@ -217,5 +272,5 @@ def fake_app(monkeypatch):
     monkeypatch.setattr(session, "owned", set())
     monkeypatch.setattr(session, "unlocked", set())
     monkeypatch.setattr(session, "allow_all_edits", False)
-    monkeypatch.setattr(enums, "_values", {"acRed": 1})
+    monkeypatch.setattr(enums, "_values", {"acRed": 1, "acVpCustomScale": 1})
     return app

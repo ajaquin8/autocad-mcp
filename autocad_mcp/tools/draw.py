@@ -113,6 +113,31 @@ def draw_circle(center: Point, radius: float, layer: str = "", name: str = "") -
 
 
 @acad_tool()
+def draw_center_mark(center: Point, radius: float, extension: float = 0.0625, layer: str = "",
+                     name: str = "") -> dict:
+    """Draw a centre mark: two crossing lines through the centre of a hole or arc, reaching a
+    little past the curve. Both lines are one undo step. Use a centre-line layer.
+
+    Args:
+        center: centre of the hole or arc [x, y].
+        radius: radius of the hole or arc being marked.
+        extension: how far the lines reach past the curve, in drawing units.
+        layer: layer to put it on (default: current layer).
+        name: which open drawing (default: active).
+    """
+    if radius <= 0 or extension < 0:
+        raise AcadError("radius must be positive and extension zero or more.")
+    x, y, z = xyz(center)
+    half = radius + extension
+    doc = session.document(name)
+    with session.edit(doc) as change:
+        across = place(change, doc.ModelSpace.AddLine(point([x - half, y, z]), point([x + half, y, z])), layer)
+        upright = place(change, doc.ModelSpace.AddLine(point([x, y - half, z]), point([x, y + half, z])), layer)
+        return {"handles": [across["handle"], upright["handle"]], "center": [x, y, z], "half_length": half,
+                "layer": across["layer"]}
+
+
+@acad_tool()
 def draw_arc(center: Point, radius: float, start_angle: float, end_angle: float,
              layer: str = "", name: str = "") -> dict:
     """Draw an arc counter-clockwise from start_angle to end_angle.
