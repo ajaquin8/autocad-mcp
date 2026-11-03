@@ -98,6 +98,11 @@ Writer: Claude Code side session (Alex: "Yes, fix it", after Claude read version
 - Version 0.1.1 in `pyproject.toml` and `autocad_mcp/app.py`, with a test that keeps them equal. Updated [[Research/AutoCAD API gotchas]] and the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
 - Validation: three new offline tests; `scripts/check.ps1` green. **Not run against a live AutoCAD** (the mapping is a lookup on the version string already returned live: 25.1 on 2026, 26.0 on 2027).
 
+## 2026-11-03: v0.1.1 released and checked live
+Writer: Claude Code side session (Alex: "Merged, publish", then installed 0.1.1 and pasted the Chat reply).
+- Release v0.1.1 (`698d988`, bundle SHA-256 `26aab952…ded2d`); the public "latest" download matched the build and passed the handshake (32 tools). The v0.1.0 notes now point to 0.1.1.
+- Live: the updated extension made Claude say "AutoCAD 2026". Recorded in [[Decisions/Distribution and install]].
+
 ## 2026-11-03: safety check (AMCP-LIVE-20261103-03) and the busy message (0.1.2)
 Writer: Claude Code side session (Alex: "Okay lets start with 1", then "Saved, go" and the AutoCAD steps between phases).
 - New: `tests/live/safety_check.py` (phased live batch) and [[Sources/2026-11-03 Safety check]]. Updated [[Sources/index]], [[Projects/AutoCAD-MCP/Roadmap]], [[Projects/AutoCAD-MCP/index]], [[Research/AutoCAD API gotchas]], README status.
