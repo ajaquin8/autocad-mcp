@@ -60,3 +60,24 @@ What the AutoCAD 2027 ActiveX (COM) API really does. Add a dated entry for every
 - **verified (AMCP-LIVE-20261103-05):** a plot with a missing plot style table still writes the PDF (in layer colours); the only trace is AutoCAD's `PlotandPublishLog.CSV` ("WARNING: Incompatible or missing plot style", "Plotted with Warning(s)"). Read that log to check a plot, not just the PDF's existence.
 - **verified:** DIMLUNIT 2 shows the dimension style's own decimal separator (DIMDSEP); a style set up for metric work prints `1,00`. Look at the printed text, not the measured value, when checking decimal dimensions.
 - **verified:** in a live script, every COM call and tool function must run on the thread that connected; connecting on the STA worker and then calling from the main thread fails with "interface marshalled for a different thread" (RPC_E_WRONG_THREAD).
+
+## 2026-11-03: dynamic blocks from outside AutoCAD
+Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to -13).
+- **verified:** scriptable through `SendCommand` + `(command ...)` in the Block Editor: `BEDIT` by name, `BPARAMETER` (visibility, linear with label, value list, chain actions, grip count), `-BVSTATE` New/Set/Delete, `BVSHOW`/`BVHIDE`, `BACTION` stretch and array, `CHPROP`, `BSAVE`, `BCLOSE`. Picking a parameter by a point on its dimension line works; `(entlast)` does not.
+- **verified:** `BACTION` keywords are Array/Move/Scale/sTretch: stretch is `T`; `S` makes a Scale action. Neither action asks for a location. An array on a linear parameter asks only "distance between columns".
+- **verified:** not scriptable: the contents of a Block Properties Table or lookup table, and fields (Insert Field is a dialog). These need a person or desktop control.
+- **verified:** objects *and parameters* added while a visibility state is current exist only in that state. Hidden parameters cannot be picked and their grips do not show on an insert. Use `BVSHOW` … All; turn `BVMODE` 1 to select objects of other states for an action.
+- **verified:** `SendCommand` rejects text containing control characters ("Invalid input"); cancel inside AutoLISP instead: a bare `(command)` acts as Esc. When a command waits for input, AutoCAD rejects all COM calls, so a scripted prompt sequence that goes wrong can only be cleared by a person (Esc).
+- **verified:** after AutoCAD closes a dialog (BEDIT, Save As, block close), it can keep rejecting COM calls and ignore clicks until one Esc in the drawing area.
+- **verified:** dynamic property objects from `GetDynamicBlockProperties` go stale after the visibility state changes; read them again before setting the next property.
+- **verified:** `GetBoundingBox` on a dynamic block reference includes geometry hidden by visibility states; `Explode` returns only what is visible (attribute text included).
+- **verified:** an array spacing typed rounded up (0.0416667 for 1/24) loses the last item when the length is an exact multiple of the spacing; round down.
+- **verified:** a BlockPlaceholder field reads a dynamic property: `%<\AcObjProp.16.2 Object(?BlockRefId).Parameter(n).VisibilityState>%` or `.UpdatedDistance \f "%lu5">%` (fractional). An attribute default can hold several fields with text between them; values update on regen.
+- **verified (bug, open):** `new_drawing` can fail with `AttributeError: <unknown>.Count` when AutoCAD is still busy initialising the drawing it just created; the drawing exists but is not marked as server-created.
+
+## 2026-11-03: AutoCAD's console engine (accoreconsole) on copies
+- **verified:** `accoreconsole.exe /i copy.dwg /s script.scr` runs AUDIT, DXFOUT, -PURGE and -PLOT in a separate windowless process without touching the open AutoCAD session; good for reading or cleaning copies of large drawings.
+- **verified:** SECURELOAD blocks `(load ...)` from an untrusted folder; type the routine into the script instead of changing trusted paths (a user setting).
+- **verified:** the console engine has no `(layoutlist)`; read layout names from the `ACAD_LAYOUT` dictionary.
+- **verified:** `-PLOT` with "Detailed plot configuration? No" plots a layout with its own page setup to PDF from the console; plots of the same drawing before and after a purge compared pixel-identical.
+- **verified:** a console run stopped silently after a second `AUDIT` with fix and never reached `QSAVE`; saving to a new file with `SAVEAS` worked. Check the file time after a console save.
