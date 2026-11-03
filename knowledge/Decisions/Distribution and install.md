@@ -56,7 +56,7 @@ Owner: Alex
 - **verified 2026-11-03 (live, reply Alex pasted from a Chat):** after installing `autocad-mcp-0.1.1.mcpb` from the v0.1.1 Release over 0.1.0, `acad_status` was answered as **"AutoCAD 2026 is running"**, with the open drawing reported locked (edit guard on). This closes the year mix-up found in the 0.1.0 test. Updating by installing the new bundle over the old one worked.
 
 ## 2026-11-03: repository settings for contributors
-- **verified 2026-11-03 (GitHub API, on Alex's go "Lets do 1 next"):** label `compatibility` created (used by the "Works on my AutoCAD" form). `main` is protected: changes only through pull requests (0 approvals required, so Alex merges his own), the `check` CI job must pass, no force-pushes, no deletion; `enforce_admins` is off, so Alex can override in an emergency. "Branch must be up to date" is off on purpose, because PRs often touch the change log at the same place.
+- **verified 2026-11-03 (GitHub API, on Alex's go "Lets do 1 next"):** label `compatibility` created (used by the "Works on my AutoCAD" form). `main` is protected: changes only through pull requests (no second reviewer required, so Alex can merge them), the `check` CI job must pass, no force-pushes, no deletion; `enforce_admins` is off, so Alex can override in an emergency. "Branch must be up to date" is off on purpose, because PRs often touch the change log at the same place.
 - **user-reported 2026-11-03:** Alex turned on GitHub email privacy in the account settings.
 
 ## Supersedes / superseded by
