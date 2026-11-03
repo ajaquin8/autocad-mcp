@@ -14,6 +14,7 @@ Question: do the new sheet tools (viewport, layouts, leader, centre mark, curren
 - **verified:** `new_drawing(template=…dwt)` gave an inches drawing with the template's layout, layers and styles; it was created by the server, so editable.
 - **verified:** `set_current_styles` made the template's dimension, multileader and text styles current. That was needed: the template's current dimension style named a style that was not in the file, and its default multileader style was metric-sized.
 - **verified:** `set_drawing_variables` DIMLUNIT 2 / DIMDEC 2 gave decimal dimensions; the six dimensions measured 1.00, 1.25, 1.29, 3.00, 2.00, 3.00.
+  - **Correction (2026-11-03, later the same day, [[Sources/2026-11-03 Plot style re-plot]]):** those are the measured values. The printed text read `1,00` etc., because the template's dimension style has a comma as decimal separator (DIMDSEP). This was missed when the screenshot was looked at.
 - **verified:** `draw_circle` + `draw_center_mark` (two lines each, on the centre layer), hidden edges on the hidden layer, the bent profile as one closed polyline with quarter-circle bulges.
 - **verified:** `add_leader` created an `AcDbMLeader` with the callout text on the leader layer.
 - **verified:** `add_viewport` created a viewport on the sheet layout at the requested paper rectangle, scale read back as 1.0 (1:1), locked, framing the views as intended (screenshot looked at).

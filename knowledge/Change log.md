@@ -122,3 +122,10 @@ Writer: Claude Code side session (Alex: "Fab part drawings", then chose the sket
 - Live: [[Sources/2026-11-03 Sheet tools]] (39/39). Lessons in [[Research/AutoCAD API gotchas]]; updated [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]], [[Sources/index]].
 - The company-specific playbook and the sheet template are private (outside this repository) by Alex's decision.
 - Validation: `scripts/check.ps1` green.
+
+## 2026-11-03: decimal separator and plot style re-plot
+Writer: Claude Code side session (Alex: "Yes, install it", "Saved, go", "Yes, add to PR #7").
+- Live: [[Sources/2026-11-03 Plot style re-plot]] (8/8) after the user's plot style table was installed outside this repository. Lessons in [[Research/AutoCAD API gotchas]]; [[Sources/index]] updated.
+- Correction in [[Sources/2026-11-03 Sheet tools]]: the decimal dimensions printed with a comma, not `1.00`.
+- `set_drawing_variables` accepts DIMDSEP ("." or ","), with an offline test. Not live-verified.
+- Validation: `scripts/check.ps1` green.

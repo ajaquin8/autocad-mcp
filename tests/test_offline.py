@@ -337,6 +337,16 @@ def test_drawing_variables_are_set_and_validated(fake_app):
         settings.set_drawing_variables({"DIMLUNIT": 9})
 
 
+def test_decimal_separator_takes_a_point_or_a_comma(fake_app):
+    session.mark_owned(fake_app.doc)
+    fake_app.doc.variables["DIMDSEP"] = ","  # a style made for metric drawings
+    result = settings.set_drawing_variables({"DIMLUNIT": 2, "dimdsep": "."})
+    assert result["DIMDSEP"] == "." and result["dimension_style_updated"] == "Standard"
+    with pytest.raises(AcadError, match="'.' or ','"):
+        settings.set_drawing_variables({"DIMDSEP": ";"})
+    assert fake_app.doc.variables["DIMDSEP"] == "."
+
+
 def test_failed_variable_change_restores_the_earlier_ones(fake_app, monkeypatch):
     session.mark_owned(fake_app.doc)
     fake_app.doc.variables["DIMSCALE"] = 1.0

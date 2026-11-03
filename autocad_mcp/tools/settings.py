@@ -8,7 +8,8 @@ from ..session import session
 from .entities import model_space
 
 # Name -> (type, minimum, maximum, meaning). Only variables stored in the drawing, so
-# changing them never touches the user's AutoCAD profile.
+# changing them never touches the user's AutoCAD profile. Text variables list their
+# allowed values in SEPARATORS instead of a range.
 VARIABLES: dict[str, tuple[type, float, float, str]] = {
     "DIMSCALE": (float, 0, 10_000, "overall dimension scale (e.g. 48 for 1/4\"=1'-0\", 24 for 1/2\"=1'-0\")"),
     "DIMTXT": (float, 0.001, 1_000, "dimension text height, before DIMSCALE"),
@@ -16,6 +17,7 @@ VARIABLES: dict[str, tuple[type, float, float, str]] = {
     "DIMLUNIT": (int, 1, 6, "dimension units: 1 scientific, 2 decimal, 3 engineering, 4 architectural, "
                             "5 fractional, 6 Windows desktop"),
     "DIMDEC": (int, 0, 8, "dimension precision"),
+    "DIMDSEP": (str, 0, 0, "decimal separator of decimal dimensions: \".\" or \",\""),
     "DIMZIN": (int, 0, 15, "zero suppression in architectural units: 3 shows 14'-0\" and 6\", "
                          "1 shows 14'-0\" and 0'-6\", 0 shows 14' and 6\""),
     "LTSCALE": (float, 0.001, 10_000, "global linetype scale"),
@@ -24,6 +26,7 @@ VARIABLES: dict[str, tuple[type, float, float, str]] = {
     "INSUNITS": (int, 0, 21, "drawing units (1 inches, 4 millimeters, ...)"),
     "TEXTSIZE": (float, 0.001, 10_000, "default text height"),
 }
+SEPARATORS = (".", ",")
 
 
 @acad_tool(read_only=True)
@@ -39,13 +42,15 @@ def get_drawing_variables(name: str = "") -> dict:
 
 
 @acad_tool()
-def set_drawing_variables(variables: dict[str, float], name: str = "") -> dict:
+def set_drawing_variables(variables: dict[str, float | str], name: str = "") -> dict:
     """Change drawing settings saved in the drawing, e.g. {"DIMSCALE": 24, "DIMLUNIT": 4,
     "LUNITS": 4, "LTSCALE": 12} for a 1/2"=1'-0" architectural drawing. DIM* values are
     also copied into the active dimension style, and model space dimensions on that style
     are rebuilt with them. One undo step; restored if any value fails.
 
-    Allowed: DIMSCALE, DIMTXT, DIMASZ, DIMLUNIT, DIMDEC, DIMZIN, LTSCALE, LUNITS, LUPREC, INSUNITS, TEXTSIZE.
+    Allowed: DIMSCALE, DIMTXT, DIMASZ, DIMLUNIT, DIMDEC, DIMDSEP, DIMZIN, LTSCALE, LUNITS, LUPREC,
+    INSUNITS, TEXTSIZE. DIMDSEP is "." or ","; a style made for metric drawings often has ",",
+    so set "." together with DIMLUNIT 2 for 1.00 rather than 1,00.
 
     Args:
         variables: name -> new value.
@@ -59,6 +64,11 @@ def set_drawing_variables(variables: dict[str, float], name: str = "") -> dict:
         if key not in VARIABLES:
             raise AcadError(f"{var} is not one of {', '.join(VARIABLES)}.")
         kind, low, high, meaning = VARIABLES[key]
+        if kind is str:
+            if value not in SEPARATORS:
+                raise AcadError(f"{key} must be one of {' or '.join(repr(s) for s in SEPARATORS)} ({meaning}).")
+            values[key] = value
+            continue
         number = kind(value)
         if kind is int and number != value:
             raise AcadError(f"{key} must be a whole number ({meaning}).")
