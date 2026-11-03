@@ -14,7 +14,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from .com import AcadError, describe_com_error, worker
+from .com import AcadError, describe_attribute_error, describe_com_error, worker
 
 INSTRUCTIONS = """\
 Drives the AutoCAD session already running on this PC (acad_status reports the version).
@@ -35,7 +35,7 @@ automatically if it fails. Results report entity handles; use them with
 get_entity, move_entities, change_properties and delete_entities.
 """
 
-mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.1")
+mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.2")
 
 
 def _where(err: BaseException) -> str:
@@ -70,7 +70,9 @@ def acad_tool(*, read_only: bool = False, destructive: bool = False,
                 raise ToolError(str(err)) from None
             except pywintypes.com_error as err:
                 raise ToolError(describe_com_error(err) + _where(err)) from None
-            except (ValueError, KeyError, IndexError, TypeError, AttributeError) as err:
+            except AttributeError as err:
+                raise ToolError(describe_attribute_error(err) + _where(err)) from None
+            except (ValueError, KeyError, IndexError, TypeError) as err:
                 raise ToolError(f"{type(err).__name__}: {err}{_where(err)}") from None
 
         annotations = ToolAnnotations(read_only_hint=read_only, destructive_hint=destructive,

@@ -47,3 +47,7 @@ What the AutoCAD 2027 ActiveX (COM) API really does. Add a dated entry for every
 
 ## 2026-11-03: Application.Version is a release number, not a year
 - **verified 2026-11-03 (a reply Alex pasted from the Claude desktop app):** `acad_status` returned `"autocad": "25.1s (LMS Tech)"` and Claude called it "AutoCAD 2025"; release 25.1 is AutoCAD 2026 (consistent with the ProgID `.25.1` noted above). `acad_status` now names the product year from a table of release numbers (`session.RELEASE_YEARS`, 2013 to 2027) and keeps the raw string as `autocad_version`. A release missing from the table is reported as "release N.N", never guessed.
+
+## 2026-11-03: a busy AutoCAD rejects late-bound lookups as AttributeError
+- **verified (AMCP-LIVE-20261103-03, AutoCAD 2026):** while the user is inside LINE or has the OPTIONS dialog open, AutoCAD rejects COM calls immediately (no hang). With pywin32's late binding the first symptom is not a `com_error` but `AttributeError: <unknown>.Count`: each new dispatch object (here `app.Documents`) looks members up by name, the lookup is rejected, and pywin32 reports the name as unknown. A warmed-up process gets the same, because `Documents` is a new object on every access. So the server's `CMDACTIVE` check is not reached in these states; AutoCAD's rejection is what keeps the drawing safe. `describe_attribute_error` maps `<unknown>.` errors to the busy message.
+- **verified:** after Esc / closing the dialog the next call works without reconnecting.
