@@ -428,10 +428,10 @@ def test_center_mark_is_two_lines_in_one_undo_step(fake_app):
 
 
 def test_list_layouts_in_tab_order_with_title_block_handles(fake_app):
-    ref = fake_app.doc.paper._add(FakeEntity(fake_app.doc, "AcDbBlockReference", EffectiveName="WAG-TB"))
+    ref = fake_app.doc.paper._add(FakeEntity(fake_app.doc, "AcDbBlockReference", EffectiveName="TITLE-BLOCK"))
     layouts = sheets.list_layouts()
     assert [lay["name"] for lay in layouts] == ["Model", "Sheet1"]
-    assert layouts[1]["blocks"] == [{"handle": ref.Handle, "name": "WAG-TB"}]
+    assert layouts[1]["blocks"] == [{"handle": ref.Handle, "name": "TITLE-BLOCK"}]
     assert query.query_entities(layout="sheet1")["matches"] == 1
     with pytest.raises(AcadError, match="Layouts: Sheet1, Model"):
         query.query_entities(layout="A-101")
@@ -463,10 +463,10 @@ def test_viewport_refuses_model_locked_drawings_and_rolls_back(fake_app):
 
 def test_current_styles_switch_and_roll_back(fake_app):
     session.mark_owned(fake_app.doc)
-    out = settings.set_current_styles(dimension_style="wag-arch", multileader_style="WAG-STD")
-    assert out == {"dimension_style": "WAG-ARCH", "multileader_style": "WAG-STD"}
-    assert fake_app.doc.ActiveDimStyle.Name == "WAG-ARCH" and fake_app.doc.variables["CMLEADERSTYLE"] == "WAG-STD"
-    with pytest.raises(AcadError, match="The drawing has: Standard, WAG-ANNO"):
+    out = settings.set_current_styles(dimension_style="arch-dim", multileader_style="NOTES")
+    assert out == {"dimension_style": "ARCH-DIM", "multileader_style": "NOTES"}
+    assert fake_app.doc.ActiveDimStyle.Name == "ARCH-DIM" and fake_app.doc.variables["CMLEADERSTYLE"] == "NOTES"
+    with pytest.raises(AcadError, match="The drawing has: Standard, NOTES-TEXT"):
         settings.set_current_styles(multileader_style="Standard", text_style="Arial")
-    assert fake_app.doc.variables["CMLEADERSTYLE"] == "WAG-STD"  # nothing half-done
+    assert fake_app.doc.variables["CMLEADERSTYLE"] == "NOTES"  # nothing half-done
 

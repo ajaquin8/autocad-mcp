@@ -209,15 +209,15 @@ class FakeDoc:
             def CopyFrom(self, source) -> None:  # noqa: N802
                 doc.undo_log.append(f"style DIMSCALE={source.variables.get('DIMSCALE')}")
         self.ActiveDimStyle = _DimStyle()
-        self.DimStyles = FakeNamed([self.ActiveDimStyle, FakeNamed.Style("WAG-ARCH")])
-        self.TextStyles = FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("WAG-ANNO")])
+        self.DimStyles = FakeNamed([self.ActiveDimStyle, FakeNamed.Style("ARCH-DIM")])
+        self.TextStyles = FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("NOTES-TEXT")])
         self.ActiveTextStyle = self.TextStyles.Item(0)
         self.variables["CMLEADERSTYLE"] = "Standard"
 
         class _Dictionaries:
             def Item(self, key: str):  # noqa: N802
                 assert key == "ACAD_MLEADERSTYLE"
-                return FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("WAG-STD")])
+                return FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("NOTES")])
         self.Dictionaries = _Dictionaries()
 
     def Regen(self, which: int) -> None:  # noqa: N802

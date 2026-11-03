@@ -32,6 +32,9 @@ An MCP server that lets Claude drive the AutoCAD 2027 session already running on
 ## 2026-11-03: safety check
 - **verified** ([[Sources/2026-11-03 Safety check]]): on AutoCAD 2026, user drawings stay locked (draw and close refused), each tool is one Ctrl+Z, nothing is drawn while the user is inside a command or a modal dialog, and blocks/attributes, move/change/delete by handle and save/close/open work. The busy refusal showed a confusing `AttributeError: <unknown>.Count`; now reported as "busy, press Esc" (0.1.2). This answers the first two open questions below (**superseded**).
 
+## 2026-11-03: sheet tools (0.1.3)
+- **verified** ([[Sources/2026-11-03 Sheet tools]]): `add_viewport`, `list_layouts`, `query_entities` on a layout, `add_leader`, `draw_center_mark` and `set_current_styles` produced a complete plotted part sketch on a real title-block sheet. `add_radial_dimension` is offline-tested only. 38 tools.
+
 ## History
 - 2026-10-29: Alex compared the existing AutoCAD MCP servers ([[Research/AutoCAD MCP landscape]]) and chose to build one in the style of inventor-mcp.
 

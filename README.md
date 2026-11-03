@@ -50,8 +50,9 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-32 tools: drawings, layers, lines/polylines/arcs/circles/text, dimensions, blocks and attributes,
-moving/re-layering/deleting by handle, queries, view capture and PDF plotting. The full list is
+38 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
+dimensions, leaders, blocks and attributes, moving/re-layering/deleting by handle, sheets (layouts,
+viewports at an exact scale, title blocks), queries, view capture and PDF plotting. The full list is
 generated from the code into
 [knowledge/Projects/AutoCAD-MCP/Tool reference.md](knowledge/Projects/AutoCAD-MCP/Tool%20reference.md).
 Coordinates are drawing units in WCS; angles are degrees.
