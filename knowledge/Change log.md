@@ -142,3 +142,8 @@ Writer: Claude Code side session (Alex: "One shared array", then "Saved, go" and
 - Live: [[Sources/2026-11-04 Dynamic block shared array]] (AMCP-LIVE-20261104-01 to -03). Lessons in [[Research/AutoCAD API gotchas]]; [[Sources/index]] and [[Projects/AutoCAD-MCP/Roadmap]] updated.
 - A dated section was added to [[Sources/2026-11-03 Dynamic block authoring]]: the fault found afterwards, and a corrected diagnosis of run 11 (inferred).
 - No code change. The block and its scripts stay outside this repository.
+
+## 2026-11-04: roadmap items to reduce desktop control
+Writer: Claude Code side session (Alex: "In general what improvements can we make … to reduce the amount of computer use", then "Yes, add them").
+- [[Projects/AutoCAD-MCP/Roadmap]]: new proposed section with five items, in order: busy handling (retry rejected calls, a cancel tool, settle after `new_drawing`); ownership across restarts; dynamic block place, test, inspect and Block Editor tools; experiments for dialog-only settings; an in-process .NET helper.
+- No code change.
