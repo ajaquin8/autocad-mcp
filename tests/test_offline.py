@@ -19,7 +19,19 @@ from autocad_mcp.app import _render, _where
 from autocad_mcp.com import AcadError, AcadTimeout, ComWorker, deg, rad, xyz
 from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
-from autocad_mcp.tools import annotate, control, documents, draw, edit, entities, layers, query, settings, sheets
+from autocad_mcp.tools import (
+    annotate,
+    blocks,
+    control,
+    documents,
+    draw,
+    edit,
+    entities,
+    layers,
+    query,
+    settings,
+    sheets,
+)
 
 # ---------- coordinates ----------
 
@@ -713,3 +725,88 @@ def test_a_registered_filter_is_kept_alive():
     t.start()
     t.join()
     assert kept == [True]
+
+
+# ---------- dynamic blocks: read, set, measure ----------
+
+
+def _screw(fake_app, owned: bool = True):
+    from conftest import FakeBlockRef
+    doc = fake_app.doc
+    if owned:
+        session.mark_owned(doc)
+    ref = doc.space._add(FakeBlockRef(doc, "WAG-FAST-TEK-SIDE", (2.0, 3.0, 0.0)))
+    return doc, ref
+
+
+def test_numbers_take_decimals_and_inch_fractions():
+    assert blocks.number("1 1/4") == 1.25 and blocks.number("1-1/4") == 1.25
+    assert blocks.number("5/8") == 0.625 and blocks.number('2"') == 2.0 and blocks.number(0.75) == 0.75
+    with pytest.raises(ValueError):
+        blocks.number("long")
+
+
+def test_get_block_properties_shows_what_a_user_sees(fake_app):
+    _, ref = _screw(fake_app, owned=False)  # read-only: works on the user's drawings too
+    info = blocks.get_block_properties(ref.Handle)
+    assert [p["name"] for p in info["properties"]] == ["Size", "Length"]  # helper and Origin left out
+    assert info["properties"][0]["allowed"] == ["#8-18", "#10-16", "#12-14"]
+    assert info["attributes"]["CALLOUT"] == {"value": '#12-14 x 1" HWH TEK', "invisible": True}
+    hidden = blocks.get_block_properties(ref.Handle, include_hidden=True)
+    assert "Visibility1" in [p["name"] for p in hidden["properties"]]
+
+
+def test_set_block_properties_in_order_with_fractions_and_regen(fake_app):
+    doc, ref = _screw(fake_app)
+    info = blocks.set_block_properties(ref.Handle, {"size": "#10-16", "Length": "1 1/4"})
+    assert ref.value("Size") == "#10-16" and ref.value("Length") == 1.25
+    assert {p["name"]: p["value"] for p in info["properties"]} == {"Size": "#10-16", "Length": 1.25}
+    assert doc.undo_log[-2:] == ["regen", "end"]
+
+
+def test_a_refused_value_puts_the_earlier_ones_back(fake_app):
+    _, ref = _screw(fake_app)
+    with pytest.raises(AcadError, match="not an allowed Length"):
+        blocks.set_block_properties(ref.Handle, {"Size": "#8-18", "Length": 3})
+    assert ref.value("Size") == "#12-14" and ref.value("Length") == 1.0
+    with pytest.raises(AcadError, match="not an allowed Size; choose from #8-18"):
+        blocks.set_block_properties(ref.Handle, {"Size": "#14-10"})
+
+
+def test_hidden_helpers_and_user_drawings_are_refused(fake_app):
+    _, ref = _screw(fake_app)
+    with pytest.raises(AcadError, match="hidden helper"):
+        blocks.set_block_properties(ref.Handle, {"Visibility1": "#8-18"})
+    blocks.set_block_properties(ref.Handle, {"Visibility1": "#8-18"}, allow_hidden=True)
+    assert ref.value("Visibility1") == "#8-18"
+    session.owned.clear()
+    with pytest.raises(AcadError, match="locked"):
+        blocks.set_block_properties(ref.Handle, {"Size": "#8-18"})
+
+
+def test_insert_block_with_dynamic_properties(fake_app):
+    session.mark_owned(fake_app.doc)
+
+    class _Blocks:
+        def Item(self, name):  # noqa: N802
+            return name
+    fake_app.doc.Blocks = _Blocks()
+    info = blocks.insert_block("WAG-FAST-TEK-SIDE", [0, 0], dynamic_properties={"Size": "#8-18", "Length": 0.75})
+    assert info["dynamic_properties"] == {"Size": "#8-18", "Length": 0.75}
+    with pytest.raises(AcadError, match="No property 'Colour'"):
+        blocks.insert_block("WAG-FAST-TEK-SIDE", [5, 0], dynamic_properties={"Colour": "red"})
+    assert len(fake_app.doc.space.items) == 1  # the failed insert was rolled back
+
+
+def test_measure_block_reports_what_is_visible_and_leaves_nothing_behind(fake_app):
+    doc, ref = _screw(fake_app)
+    blocks.set_block_properties(ref.Handle, {"Size": "#8-18", "Length": 2})
+    before = len(doc.space.items)
+    m = blocks.measure_block(ref.Handle, include_geometry=True)
+    assert m["extents"]["width"] == 0.348 and m["extents_from_insertion_point"]["min"] == [-0.174, -2.0]
+    assert m["counts"] == {"AcDbAttributeDefinition": 1, "AcDbLine": 2}
+    assert m["geometry"][1] == {"type": "AcDbLine", "start": [2.0, 3.0], "end": [2.0, 1.0]}
+    assert len(doc.space.items) == before  # the exploded copy was deleted
+    session.owned.clear()
+    with pytest.raises(AcadError, match="locked"):
+        blocks.measure_block(ref.Handle)

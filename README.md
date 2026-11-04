@@ -56,8 +56,8 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-39 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
-dimensions, leaders, blocks and attributes, moving/re-layering/deleting by handle, sheets (layouts,
+42 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
+dimensions, leaders, blocks and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, sheets (layouts,
 viewports at an exact scale, title blocks), queries, view capture, PDF plotting and clearing a stuck prompt. The full list is
 generated from the code into
 [knowledge/Projects/AutoCAD-MCP/Tool reference.md](knowledge/Projects/AutoCAD-MCP/Tool%20reference.md).

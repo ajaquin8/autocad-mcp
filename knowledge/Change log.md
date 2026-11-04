@@ -164,3 +164,13 @@ Writer: Claude Code side session (Alex: "Yes, start item 2").
 - Code (`session.py`): a record of the server-created drawings, kept in `%LOCALAPPDATA%\autocad-mcp\owned.json`. A restarted server takes back only drawings still open in the same AutoCAD (same process and start time, same key, same `Document.HWND`). The record is updated on create, Save As and close.
 - README Safety section and [[Decisions/Edit guard and document safety]] updated (dated section; the "resets on restart" rule is narrowed, not dropped); [[Projects/AutoCAD-MCP/Roadmap]] item 2 status.
 - Tests: 6 new offline tests (70 in total). Live: [[Sources/2026-11-04 Ownership across restarts]] (AMCP-LIVE-20261104-05). It also fixed `open_drawing`, which now waits for the opened drawing to settle, and made `MessageFilter.register()` keep registered filters alive after a one-off script crashed.
+
+## 2026-11-04: dynamic block tools, part 1 (roadmap item 3)
+Writer: Claude Code side session (Alex: "Yes lets do that next").
+- New tools (`tools/blocks.py`):
+  - `get_block_properties` (read-only): shown dynamic properties with allowed values, plus attributes and whether each is invisible.
+  - `set_block_properties`: by name, in order, with distances as numbers or inch fractions, checked against allowed values. It is one undo step and rolls back on refusal. Hidden helpers need `allow_hidden`. It regenerates so label fields update.
+  - `measure_block`: explodes a temporary copy, reports the visible extents and counts (optionally the geometry), then deletes it. Server-created drawings only.
+  - `insert_block` takes `dynamic_properties`.
+- [[Projects/AutoCAD-MCP/Tool reference]] regenerated (42 tools); README and [[Projects/AutoCAD-MCP/Roadmap]] item 3 status updated.
+- Tests: 7 new offline tests (77 in total). Live: [[Sources/2026-11-04 Dynamic block tools]] (AMCP-LIVE-20261104-06), 13/13. The first run's one miss was the script's own height check, now a tip check.
