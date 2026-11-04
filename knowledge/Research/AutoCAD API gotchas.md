@@ -112,3 +112,4 @@ Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to
 ## 2026-11-04: bounding box of a dynamic block ([[Sources/2026-11-04 Block tools through the server]])
 - **verified:** `GetBoundingBox` on a dynamic block reference reported the extents of a larger, hidden size (x ±0.26, top 0.19 at a size that shows ±0.207, top 0.12). The stretched end did follow the current length.
 - **inferred:** the box includes objects hidden by the visibility state. To get what is shown, explode a copy and measure it (`measure_block`).
+- **2026-11-04, later:** `insert_block` now reports a dynamic block's `bbox` from an exploded copy (what it shows), not from `GetBoundingBox`. `query_entities` and `get_entity` still report AutoCAD's box.

@@ -49,7 +49,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 ## Blocks
 
 - **`list_blocks`** (read-only): List block definitions in the drawing (not layouts or xrefs), with their attribute tags. Parameters: `include_anonymous`, `name`.
-- **`insert_block`**: Insert a block reference, optionally filling in its attributes and dynamic properties. Parameters: `block`, `position`, `scale`, `rotation`, `attribute_values`, `layer`, `dynamic_properties`, `name`.
+- **`insert_block`**: Insert a block reference, optionally filling in its attributes and dynamic properties. For a dynamic block, "bbox" is what the block shows at its current size (measured from a temporary exploded copy, attribute text left out); AutoCAD's own box also counts hidden sizes. Parameters: `block`, `position`, `scale`, `rotation`, `attribute_values`, `layer`, `dynamic_properties`, `name`.
 - **`set_block_attributes`**: Change attribute values of an existing block reference. Parameters: `handle`, `values`, `name`.
 - **`get_block_properties`** (read-only): Read a block reference's dynamic properties (value, allowed values) and attributes (value, invisible). Works on any open drawing. Parameters: `handle`, `include_hidden`, `name`.
 - **`set_block_properties`**: Set dynamic block properties by name, in the order given, as one undo step; if any value is refused, all are put back. Distances take numbers or inch fractions ("1 1/4"). Lists (e.g. Size) must use one of the allowed values (see get_block_properties). Parameters: `handle`, `properties`, `regen`, `allow_hidden`, `name`.

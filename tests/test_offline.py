@@ -798,6 +798,21 @@ def test_insert_block_with_dynamic_properties(fake_app):
     assert len(fake_app.doc.space.items) == 1  # the failed insert was rolled back
 
 
+def test_insert_block_reports_what_a_dynamic_block_shows(fake_app):
+    # AutoCAD's own box also counts hidden sizes (the fake returns 0,0-1,1); the tool measures instead.
+    session.mark_owned(fake_app.doc)
+
+    class _Blocks:
+        def Item(self, name):  # noqa: N802
+            return name
+    fake_app.doc.Blocks = _Blocks()
+    info = blocks.insert_block("WAG-FAST-TEK-SIDE", [2, 3], dynamic_properties={"Size": "#8-18", "Length": 2})
+    assert info["bbox"] == [[1.826, 1.0], [2.174, 3.0]]
+    assert [e.ObjectName for e in fake_app.doc.space.items] == ["AcDbBlockReference"]  # the copy was deleted
+    plain = blocks.insert_block("WAG-FAST-TEK-SIDE", [0, 0])  # dynamic, no properties given: measured too
+    assert plain["bbox"] == [[-0.216, -1.0], [0.216, 0.0]]
+
+
 def test_measure_block_reports_what_is_visible_and_leaves_nothing_behind(fake_app):
     doc, ref = _screw(fake_app)
     blocks.set_block_properties(ref.Handle, {"Size": "#8-18", "Length": 2})
