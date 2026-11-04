@@ -28,3 +28,9 @@ Record the run in [[Sources/index]] and the lessons in [[Research/AutoCAD API go
 - Office drawing workflows: elevations and details from window/door data, sheet sets, standard blocks from a company library (read-only, never committed).
 - Selection-set filters for fast queries on big drawings (the current query reads model space one entity at a time).
 - An in-process .NET helper only if COM speed or rollback limits become a real problem.
+
+## 2026-11-03: from the dynamic block series
+Status: **proposed** (Claude). See [[Sources/2026-11-03 Dynamic block authoring]].
+- Fix: `new_drawing` should wait for AutoCAD to finish initialising the new drawing before looking it up (it can fail with `<unknown>.Count` while the drawing is still opening).
+- New tool: set a placed dynamic block's properties (visibility state, distances) and read its attributes, so a fastener or unit block can be placed "size × length" from a description or schedule.
+- Possible: a Block Editor helper for the scriptable parts (parameters, states, stretch/array actions with point picks), with the lessons above built in. Tables and fields stay manual.

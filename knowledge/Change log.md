@@ -129,3 +129,10 @@ Writer: Claude Code side session (Alex: "Yes, install it", "Saved, go", "Yes, ad
 - Correction in [[Sources/2026-11-03 Sheet tools]]: the decimal dimensions printed with a comma, not `1.00`.
 - `set_drawing_variables` accepts DIMDSEP ("." or ","), with an offline test. Not live-verified.
 - Validation: `scripts/check.ps1` green.
+
+## 2026-11-03: dynamic block authoring series
+Writer: Claude Code side session (Alex: "Yes, record them", after the runs approved with "Saved, go").
+- Live: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to -13). Lessons in [[Research/AutoCAD API gotchas]] (dynamic blocks; the console engine); [[Sources/index]] and [[Projects/AutoCAD-MCP/Roadmap]] updated.
+- No code change. Open bug recorded: `new_drawing` can fail while AutoCAD is busy initialising the new drawing.
+- The block, its data and the scripts that built it are the user's and stay outside this repository.
+- Validation: `scripts/check.ps1` green.
