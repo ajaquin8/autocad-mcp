@@ -30,19 +30,34 @@ REPORT = os.environ.get("AMCP_REPORT", "AMCP-LIVE-BUSY")
 STATE = os.path.join(SCRATCH, f"{REPORT}-state.json")
 
 
-def scratch_doc():
+def scratch_name() -> str:
     with open(STATE, encoding="utf-8") as fh:
-        name = json.load(fh)["scratch"]
-    doc = session.find_document(name)
+        return json.load(fh)["scratch"]
+
+
+def scratch_doc():
+    doc = session.find_document(scratch_name())
     session.mark_owned(doc)
     return doc
+
+
+def mark_scratch_without_com() -> None:
+    """While a prompt is open AutoCAD rejects COM, so the never-saved scratch drawing is marked
+    as server-created from its name alone (the same key doc_key would give it)."""
+    session.owned.add("unsaved:" + scratch_name().lower())
 
 
 def main(phase: str) -> None:
     pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
     message_filter = MessageFilter(retry_seconds())
     message_filter.register()
-    session.connect()
+    try:
+        session.connect()
+    except Exception as err:  # noqa: BLE001 - with a prompt open, even connecting can be rejected
+        print("connect was rejected:", err)
+    if not session.hwnd and os.path.exists(STATE):  # the server keeps the handle from its first connection
+        with open(STATE, encoding="utf-8") as fh:
+            session.hwnd = json.load(fh).get("hwnd")
     check("AutoCAD window found", bool(session.hwnd), str(session.hwnd))
     if phase == "new":
         start = time.monotonic()
@@ -51,17 +66,17 @@ def main(phase: str) -> None:
         if info:
             os.makedirs(SCRATCH, exist_ok=True)
             with open(STATE, "w", encoding="utf-8") as fh:
-                json.dump({"scratch": info["name"]}, fh)
+                json.dump({"scratch": info["name"], "hwnd": session.hwnd}, fh)
     elif phase == "refused":
         scratch_doc()
         step("cancel refuses in the user's drawing", control.cancel, expect_error="Refused")
     elif phase == "cancel":
-        doc = scratch_doc()
+        mark_scratch_without_com()
         step("cancel_command", control.cancel)
-        deadline, active = time.monotonic() + 5, None
+        deadline, active = time.monotonic() + 8, None
         while time.monotonic() < deadline:
             try:
-                active = int(doc.GetVariable("CMDACTIVE"))
+                active = int(scratch_doc().GetVariable("CMDACTIVE"))
                 if active == 0:
                     break
             except Exception:  # noqa: BLE001 - still rejected
@@ -73,6 +88,8 @@ def main(phase: str) -> None:
         step("close the scratch drawing", documents.close_document, str(doc.Name), discard_changes=True)
     else:
         raise SystemExit(__doc__)
+    print("COM rejections by type (1 refused, 2 retry later):", message_filter.rejections,
+          "retried:", message_filter.retries)
 
 
 if __name__ == "__main__":

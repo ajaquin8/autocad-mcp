@@ -75,4 +75,4 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 ## control
 
-- **`cancel_command`**: Press Esc twice in AutoCAD to clear a command or prompt this server left open (for example a scripted command stopped at "Select objects:"), which makes AutoCAD reject every other call. Works even then: it uses window messages, not COM. Refuses unless AutoCAD's active drawing is one this server created, so it cannot cancel the user's work in their own drawings. Do not use it while the user is working in that drawing.
+- **`cancel_command`**: Cancel a command or prompt this server left open in AutoCAD (for example a scripted command stopped at "Select objects:"), which makes AutoCAD reject every other call. Works even then: it hands AutoCAD two Ctrl+C through a window message, not COM. Refuses unless AutoCAD's active drawing is one this server created, so it cannot cancel the user's work in their own drawings. Do not use it while the user is working in that drawing.

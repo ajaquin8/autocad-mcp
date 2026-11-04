@@ -165,6 +165,7 @@ class MessageFilter:
     def __init__(self, seconds: float) -> None:
         self.limit_ms = int(seconds * 1000)
         self.retries = 0
+        self.rejections: dict[int, int] = {}  # reject type -> times COM asked (1 = refused, 2 = retry later)
         self._vtbl = _Vtbl(_QI(self._query_interface), _REF(lambda this: 1), _REF(lambda this: 1),
                            _INCOMING(lambda this, kind, caller, ticks, info: 0),  # SERVERCALL_ISHANDLED
                            _RETRY(self._retry_rejected_call),
@@ -177,6 +178,7 @@ class MessageFilter:
 
     def delay(self, ticks: int, reject_type: int) -> int:
         """Milliseconds to wait before retrying, or _CANCEL to give up."""
+        self.rejections[reject_type] = self.rejections.get(reject_type, 0) + 1
         if reject_type != SERVERCALL_RETRYLATER or ticks >= self.limit_ms:
             return _CANCEL
         self.retries += 1

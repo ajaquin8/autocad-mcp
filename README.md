@@ -42,7 +42,7 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
 - **Busy guard:** edits are refused while you are in a command, prompt or dialog (`CMDACTIVE`).
   When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
   retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
-- **`cancel_command`** presses Esc to clear a prompt the server left open, and refuses unless the
+- **`cancel_command`** cancels (two Ctrl+C) a prompt the server left open, and refuses unless the
   active drawing is one the server created.
 - **One undo step per tool** (UNDO Begin/End marks). If a tool fails, what it created is deleted
   and what it changed is put back.

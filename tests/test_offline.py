@@ -578,8 +578,9 @@ class _Window:
     def GetWindowText(self, hwnd):  # noqa: N802
         return self.title
 
-    def PostMessage(self, *args):  # noqa: N802
-        self.posted.append(args)
+    def send(self, hwnd, text):
+        self.posted.append((hwnd, text))
+        return True
 
 
 def test_cancel_needs_a_connection(fake_app):
@@ -590,6 +591,7 @@ def test_cancel_needs_a_connection(fake_app):
 def test_cancel_refuses_when_a_user_drawing_is_active(fake_app, monkeypatch):
     window = _Window("Autodesk AutoCAD 2026  Plan.dwg")
     monkeypatch.setattr(control, "win32gui", window)
+    monkeypatch.setattr(control, "send_input", window.send)
     monkeypatch.setattr(session, "hwnd", 1234)
     session.mark_owned(fake_app.doc)  # Drawing1.dwg is ours, but it is not the active one
     with pytest.raises(ToolError, match="Refused.*user's own command"):
@@ -600,13 +602,18 @@ def test_cancel_refuses_when_a_user_drawing_is_active(fake_app, monkeypatch):
     assert window.posted == []
 
 
-def test_cancel_sends_esc_twice_when_a_server_drawing_is_active(fake_app, monkeypatch):
-    window = _Window("Autodesk AutoCAD 2026  Drawing1.dwg")
+def test_cancel_sends_two_ctrl_c_when_a_server_drawing_is_active(fake_app, monkeypatch):
+    # Live 2026-11-04 the title read "<product> - [Drawing35.dwg]"; ^C^C by WM_COPYDATA cleared LINE.
+    window = _Window("Autodesk AutoCAD 2026 - [Drawing1.dwg]")
     monkeypatch.setattr(control, "win32gui", window)
+    monkeypatch.setattr(control, "send_input", window.send)
     monkeypatch.setattr(session, "hwnd", 1234)
     session.mark_owned(fake_app.doc)
-    assert "Sent Esc twice" in control.cancel()
-    assert window.posted == [(1234, 0x0102, 27, 0)] * 2  # WM_CHAR, VK_ESCAPE
-    window.title, window.posted = "AutoCAD 2026 - [Drawing1.dwg]", []
+    assert "Cancelled the command in 'drawing1.dwg'" in control.cancel()
+    assert window.posted == [(1234, "")]
+    window.title = "Autodesk AutoCAD 2026  Drawing1.dwg"
     control.cancel()
     assert len(window.posted) == 2
+    monkeypatch.setattr(control, "send_input", lambda hwnd, text: False)
+    with pytest.raises(AcadError, match="did not accept"):
+        control.cancel()
