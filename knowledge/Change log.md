@@ -158,3 +158,9 @@ Writer: Claude Code side session (Alex: "start on item 1 the busy handling").
   - Server instructions and README updated. [[Projects/AutoCAD-MCP/Tool reference]] regenerated (39 tools).
 - Docs: dated sections in [[Decisions/Edit guard and document safety]] and [[Projects/AutoCAD-MCP/Roadmap]]; a lesson in [[Research/AutoCAD API gotchas]].
 - Tests: 8 new offline tests (64 in total). Live: [[Sources/2026-11-04 Busy handling]] (AMCP-LIVE-20261104-04). The first cancel method, Esc window messages, failed live, and the tool was changed to WM_COPYDATA `^C^C`, which passed. The filter also counts rejections by type, for diagnosis.
+
+## 2026-11-04: ownership across a server restart (roadmap item 2)
+Writer: Claude Code side session (Alex: "Yes, start item 2").
+- Code (`session.py`): a record of the server-created drawings, kept in `%LOCALAPPDATA%\autocad-mcp\owned.json`. A restarted server takes back only drawings still open in the same AutoCAD (same process and start time, same key, same `Document.HWND`). The record is updated on create, Save As and close.
+- README Safety section and [[Decisions/Edit guard and document safety]] updated (dated section; the "resets on restart" rule is narrowed, not dropped); [[Projects/AutoCAD-MCP/Roadmap]] item 2 status.
+- Tests: 4 new offline tests (68 in total). Live script `tests/live/ownership_check.py` written, **not run**.

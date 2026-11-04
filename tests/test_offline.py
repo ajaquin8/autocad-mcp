@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import threading
 import time
@@ -617,3 +618,57 @@ def test_cancel_sends_two_ctrl_c_when_a_server_drawing_is_active(fake_app, monke
     monkeypatch.setattr(control, "send_input", lambda hwnd, text: False)
     with pytest.raises(AcadError, match="did not accept"):
         control.cancel()
+
+
+# ---------- ownership across a server restart ----------
+
+
+def _restarted(app, identity):
+    """A new server process connecting to the same (or another) AutoCAD."""
+    fresh = Session()
+    fresh._app, fresh.identity = app, identity
+    return fresh
+
+
+def test_owned_drawing_survives_a_server_restart(fake_app):
+    session.identity = "100@2026-11-04T08:00:00"
+    new = documents.new_drawing()
+    fresh = _restarted(fake_app, "100@2026-11-04T08:00:00")
+    assert fresh.restore_owned() == [new["name"]]
+    assert fresh.is_editable(fresh.find_document(new["name"]))
+    assert not fresh.is_editable(fake_app.doc)  # the user's drawing stays locked
+
+
+def test_a_reopened_drawing_or_another_autocad_stays_locked(fake_app):
+    session.identity = "100@2026-11-04T08:00:00"
+    new = documents.new_drawing()
+    docs = fake_app.Documents.docs
+    docs[-1] = FakeDoc(new["name"])  # closed and opened again: same name, new document window
+    assert _restarted(fake_app, "100@2026-11-04T08:00:00").restore_owned() == []
+    session.mark_owned(docs[-1])
+    other = _restarted(fake_app, "200@2026-11-04T09:30:00")  # AutoCAD itself was restarted
+    assert other.restore_owned() == [] and not other.owned
+    record = json.loads(session_module.OWNED_RECORD.read_text(encoding="utf-8"))
+    assert record == {"autocad": "200@2026-11-04T09:30:00", "drawings": []}  # the stale record is dropped
+
+
+def test_unlocks_are_not_kept_and_the_record_follows_save_as_and_close(fake_app):
+    session.identity = "100@2026-11-04T08:00:00"
+    session.unlocked.add(doc_key(fake_app.doc))  # the user's drawing, unlocked on request
+    new = documents.new_drawing()
+    doc = session.find_document(new["name"])
+    old_key = doc_key(doc)
+    doc.FullName = r"C:\Jobs\Part.dwg"
+    session.rekey(old_key, doc)
+    record = json.loads(session_module.OWNED_RECORD.read_text(encoding="utf-8"))
+    assert [d["key"] for d in record["drawings"]] == [doc_key(doc)]
+    fresh = _restarted(fake_app, "100@2026-11-04T08:00:00")
+    fresh.restore_owned()
+    assert not fresh.unlocked and not fresh.is_editable(fake_app.doc)
+    session.forget(doc_key(doc))
+    assert json.loads(session_module.OWNED_RECORD.read_text(encoding="utf-8"))["drawings"] == []
+
+
+def test_no_record_without_an_autocad_identity(fake_app):
+    documents.new_drawing()
+    assert not session_module.OWNED_RECORD.exists()

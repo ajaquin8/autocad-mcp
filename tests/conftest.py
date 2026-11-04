@@ -188,12 +188,16 @@ class FakeNamed:
 
 
 class FakeDoc:
+    _next_window = 0x5000
+
     def __init__(self, name: str = "Drawing1.dwg", full_name: str = "") -> None:
         self.Name, self.FullName = name, full_name
         self.Saved, self.ReadOnly = True, False
         self.variables = {"CMDACTIVE": 0, "INSUNITS": 4, "MEASUREMENT": 1}
         self.undo_log: list[str] = []
         self.fail_next_add = False
+        FakeDoc._next_window += 1
+        self.HWND = FakeDoc._next_window  # a new document window each time a drawing is opened
         self.space = FakeSpace(self)
         self.Layers = FakeLayers()
         self.Linetypes = FakeLinetypes()
@@ -298,10 +302,13 @@ class FakeApp:
 
 
 @pytest.fixture()
-def fake_app(monkeypatch):
+def fake_app(monkeypatch, tmp_path):
     app = FakeApp()
     monkeypatch.setattr(session, "_app", app)
     monkeypatch.setattr(session, "owned", set())
+    monkeypatch.setattr(session, "owned_windows", {})
+    monkeypatch.setattr(session, "identity", None)  # no ownership record unless a test sets one
+    monkeypatch.setattr(session_module, "OWNED_RECORD", tmp_path / "owned.json")
     monkeypatch.setattr(session, "unlocked", set())
     monkeypatch.setattr(session, "allow_all_edits", False)
     monkeypatch.setattr(enums, "_values", {"acRed": 1, "acVpCustomScale": 1})

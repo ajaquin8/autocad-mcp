@@ -39,6 +39,8 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
 
 - **Edit guard:** only drawings created through the server (`new_drawing`) are editable. An
   existing drawing must be unlocked with `allow_edit_document`, which happens only when you ask.
+  If the server restarts, it takes back the drawings it created that are still open in the same
+  AutoCAD; a drawing closed and opened again, or anything after AutoCAD restarts, stays locked.
 - **Busy guard:** edits are refused while you are in a command, prompt or dialog (`CMDACTIVE`).
   When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
   retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
