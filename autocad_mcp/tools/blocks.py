@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pywintypes
@@ -115,6 +117,28 @@ def apply_properties(ref: Any, values: dict[str, Any], change: Any, allow_hidden
         prop.Value = value
 
 
+@contextmanager
+def exploded(ref: Any, change: Any) -> Iterator[list]:
+    """Explode a temporary copy of a block reference (the reference itself stays). The parts
+    are recorded for rollback while in use, then deleted and forgotten again."""
+    parts = [change.add(p) for p in ref.Explode()]
+    try:
+        yield parts
+    finally:
+        for p in parts:
+            p.Delete()
+        change.created[:] = [o for o in change.created if not any(o is p for p in parts)]
+
+
+def shown_extents(parts: list) -> tuple[list[float], list[float]] | None:
+    """Lower-left and upper-right [x, y] of the exploded geometry (attribute text left out)."""
+    boxes = [p.GetBoundingBox() for p in parts if str(p.ObjectName) not in NOT_GEOMETRY]
+    if not boxes:
+        return None
+    return ([min(b[0][0] for b in boxes), min(b[0][1] for b in boxes)],
+            [max(b[1][0] for b in boxes), max(b[1][1] for b in boxes)])
+
+
 def set_attributes(ref, values: dict[str, str], change) -> list[str]:
     """Set attribute values by tag (case-insensitive); returns the tags that were not found."""
     wanted = {str(k).upper(): str(v) for k, v in values.items()}
@@ -161,6 +185,8 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
                  attribute_values: dict[str, str] | None = None, layer: str = "",
                  dynamic_properties: dict[str, str | float] | None = None, name: str = "") -> dict:
     """Insert a block reference, optionally filling in its attributes and dynamic properties.
+    For a dynamic block, "bbox" is what the block shows at its current size (measured from a
+    temporary exploded copy, attribute text left out); AutoCAD's own box also counts hidden sizes.
 
     Args:
         block: a block defined in the drawing (see list_blocks), or the full path of a
@@ -197,6 +223,12 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
             apply_properties(ref, dynamic_properties, change)
             doc.Regen(1)  # fields in attributes (labels) update on regen
         info = place(change, ref, layer)
+        if bool(getattr(ref, "IsDynamicBlock", False)):
+            # GetBoundingBox counts objects hidden by the visibility state (verified 2026-11-04).
+            with exploded(ref, change) as parts:
+                box = shown_extents(parts)
+            if box:
+                info["bbox"] = [rounded(box[0]), rounded(box[1])]
         if dynamic_properties:
             info["dynamic_properties"] = {p["name"]: p["value"] for p in map(property_info, block_props(ref).values())
                                           if p["shown"]}
@@ -303,16 +335,14 @@ def measure_block(handle: str, include_geometry: bool = False, name: str = "") -
     doc = session.document(name)
     with session.edit(doc) as change:
         ref = block_ref(doc, handle)
-        parts = [change.add(p) for p in ref.Explode()]
-        try:
+        with exploded(ref, change) as parts:
             geometry = [p for p in parts if str(p.ObjectName) not in NOT_GEOMETRY]
             counts = Counter(str(p.ObjectName) for p in parts)
             result: dict = {"handle": str(ref.Handle), "block": str(getattr(ref, "EffectiveName", ref.Name)),
                             "counts": dict(sorted(counts.items()))}
-            boxes = [p.GetBoundingBox() for p in geometry]
-            if boxes:
-                lo = [min(b[0][0] for b in boxes), min(b[0][1] for b in boxes)]
-                hi = [max(b[1][0] for b in boxes), max(b[1][1] for b in boxes)]
+            box = shown_extents(parts)
+            if box:
+                lo, hi = box
                 base = list(ref.InsertionPoint)[:2]
                 result["extents"] = {"min": rounded(lo), "max": rounded(hi), "width": round(hi[0] - lo[0], 6),
                                      "height": round(hi[1] - lo[1], 6)}
@@ -324,7 +354,3 @@ def measure_block(handle: str, include_geometry: bool = False, name: str = "") -
                 if len(geometry) > MAX_GEOMETRY:
                     result["geometry_truncated"] = len(geometry)
             return result
-        finally:
-            for p in parts:
-                p.Delete()
-            change.created.clear()

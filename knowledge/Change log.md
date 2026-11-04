@@ -180,3 +180,9 @@ Writer: Claude Code (Alex: "Saved, go", then "Yes, close and record").
 - New: [[Sources/2026-11-04 Block tools through the server]] (AMCP-LIVE-20261104-07), 8/8 through Claude's own MCP connection after the merge and a full restart of Claude.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]] (a dynamic block's bounding box includes hidden sizes).
 - No code changed.
+
+## 2026-11-04: insert_block reports what a dynamic block shows
+Writer: Claude Code (Alex: "Yes, fix it").
+- `insert_block`: for a dynamic block, `bbox` is now measured from a temporary exploded copy (attribute text left out), because AutoCAD's box also counts hidden sizes ([[Sources/2026-11-04 Block tools through the server]]). `measure_block` shares the same helpers; it now forgets only its own exploded parts instead of clearing the whole rollback list.
+- Updated: [[Research/AutoCAD API gotchas]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
+- Tests: 1 new offline test (78 in total). **Not live-verified.**
