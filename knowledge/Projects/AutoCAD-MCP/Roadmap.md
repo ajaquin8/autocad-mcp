@@ -32,5 +32,7 @@ Record the run in [[Sources/index]] and the lessons in [[Research/AutoCAD API go
 ## 2026-11-03: from the dynamic block series
 Status: **proposed** (Claude). See [[Sources/2026-11-03 Dynamic block authoring]].
 - Fix: `new_drawing` should wait for AutoCAD to finish initialising the new drawing before looking it up (it can fail with `<unknown>.Count` while the drawing is still opening).
+  - 2026-11-04: the same wait is needed after the lookup succeeds. An add-in loading into each new drawing rejected the next calls for several seconds ([[Sources/2026-11-04 Dynamic block shared array]]).
 - New tool: set a placed dynamic block's properties (visibility state, distances) and read its attributes, so a fastener or unit block can be placed "size × length" from a description or schedule.
 - Possible: a Block Editor helper for the scriptable parts (parameters, states, stretch/array actions with point picks), with the lessons above built in. Tables and fields stay manual.
+- 2026-11-04: a Block Editor helper should name the parameter point (`_S`/`_T`), pick on label text within a known zoom, lock attribute positions before `BVSHOW`, and read the saved file back (DXF) to check each action's parameter point and selection. A clean run is not proof that the wiring is right.

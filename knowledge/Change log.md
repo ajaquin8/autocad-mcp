@@ -136,3 +136,9 @@ Writer: Claude Code side session (Alex: "Yes, record them", after the runs appro
 - No code change. Open bug recorded: `new_drawing` can fail while AutoCAD is busy initialising the new drawing.
 - The block, its data and the scripts that built it are the user's and stay outside this repository.
 - Validation: `scripts/check.ps1` green.
+
+## 2026-11-04: dynamic block rebuilt around one shared array
+Writer: Claude Code side session (Alex: "One shared array", then "Saved, go" and "Yes, record them").
+- Live: [[Sources/2026-11-04 Dynamic block shared array]] (AMCP-LIVE-20261104-01 to -03). Lessons in [[Research/AutoCAD API gotchas]]; [[Sources/index]] and [[Projects/AutoCAD-MCP/Roadmap]] updated.
+- A dated section was added to [[Sources/2026-11-03 Dynamic block authoring]]: the fault found afterwards, and a corrected diagnosis of run 11 (inferred).
+- No code change. The block and its scripts stay outside this repository.
