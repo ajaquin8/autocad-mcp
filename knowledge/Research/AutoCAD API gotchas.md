@@ -108,3 +108,7 @@ Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to
 - **verified:** `Document.HWND` gives each open drawing its own window handle, and a file closed and opened again gets a new one. Together with the AutoCAD process id and start time, that identifies "the same open drawing" across a server restart.
 - **verified:** like `Documents.Add`, `Documents.Open` can return before AutoCAD answers calls about the new drawing. Wait until it answers several calls in a row.
 - **verified:** COM holds only a raw pointer to a message filter. If Python frees the ctypes object, the next rejected call crashes the process, so keep registered filters referenced for the life of the process.
+
+## 2026-11-04: bounding box of a dynamic block ([[Sources/2026-11-04 Block tools through the server]])
+- **verified:** `GetBoundingBox` on a dynamic block reference reported the extents of a larger, hidden size (x ±0.26, top 0.19 at a size that shows ±0.207, top 0.12). The stretched end did follow the current length.
+- **inferred:** the box includes objects hidden by the visibility state. To get what is shown, explode a copy and measure it (`measure_block`).

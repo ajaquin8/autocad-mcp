@@ -174,3 +174,9 @@ Writer: Claude Code side session (Alex: "Yes lets do that next").
   - `insert_block` takes `dynamic_properties`.
 - [[Projects/AutoCAD-MCP/Tool reference]] regenerated (42 tools); README and [[Projects/AutoCAD-MCP/Roadmap]] item 3 status updated.
 - Tests: 7 new offline tests (77 in total). Live: [[Sources/2026-11-04 Dynamic block tools]] (AMCP-LIVE-20261104-06), 13/13. The first run's one miss was the script's own height check, now a tip check.
+
+## 2026-11-04: block tools through the server
+Writer: Claude Code (Alex: "Saved, go", then "Yes, close and record").
+- New: [[Sources/2026-11-04 Block tools through the server]] (AMCP-LIVE-20261104-07), 8/8 through Claude's own MCP connection after the merge and a full restart of Claude.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]] (a dynamic block's bounding box includes hidden sizes).
+- No code changed.
