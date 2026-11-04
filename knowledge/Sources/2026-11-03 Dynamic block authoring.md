@@ -23,3 +23,7 @@ Question: can a dynamic block (visibility states, parameters, actions, attribute
 
 ## Process notes
 - Computer use: `open_application` started a second AutoCAD instance instead of fronting the running one (closed again within a minute, nothing open in it); typing that goes through the clipboard into the drawing area becomes a `PASTECLIP` (cancelled); the desktop tool will not type into AutoCAD's file dialogs, so the user typed the one file name.
+
+## 2026-11-04: fault found after these runs
+- user-reported: on a placed block, changing only the size left the threads of the size it was first worked out at (#12-14), and the label lagged until a regen. The tests above always set Length after the size, so they missed it.
+- The block was rebuilt with one shared thread array; see [[Sources/2026-11-04 Dynamic block shared array]], which also corrects the diagnosis of run 11 (inferred).
