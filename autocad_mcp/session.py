@@ -11,16 +11,33 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import time
 import winreg
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, TypeVar
 
 import pythoncom
 import pywintypes
 import win32com.client
 import win32com.client.dynamic
 
-from .com import RPC_GONE_CODES, AcadError, enums
+from .com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, enums
+
+T = TypeVar("T")
+
+# settle(): a new drawing counts as ready once it answers this many calls in a row, this far apart.
+# Add-ins that load into every new drawing made AutoCAD reject calls for several seconds after the
+# drawing first answered (verified 2026-11-04).
+SETTLE_CALLS = 3
+SETTLE_PAUSE = 0.5
+SETTLE_TIMEOUT = 45.0
+
+
+def is_busy_error(err: BaseException) -> bool:
+    """A call AutoCAD rejected because it was busy (as a COM error, or as pywin32's failed lookup)."""
+    if isinstance(err, pywintypes.com_error):
+        return bool(err.args) and err.args[0] in RPC_BUSY_CODES
+    return isinstance(err, AttributeError) and str(err).startswith("<unknown>.")
 
 # Each AutoCAD release registers AutoCAD.Application.<release> (2027 is .26, 2026 is
 # .25.1, 2025 is .25, 2024 is .24.3 ...); the unversioned name is the last resort (it
@@ -163,6 +180,7 @@ class Session:
         self.owned: set[str] = set()
         self.unlocked: set[str] = set()
         self.allow_all_edits = _env_flag("AUTOCAD_MCP_ALLOW_ALL_EDITS")
+        self.hwnd: int | None = None  # AutoCAD's main window, for cancel_command (which uses no COM)
 
     # ---------- connection ----------
 
@@ -206,6 +224,8 @@ class Session:
             app = _late_bound(progid)
             app.Visible = True
         self._app = app
+        with contextlib.suppress(pywintypes.com_error, AttributeError, TypeError, ValueError):
+            self.hwnd = int(app.HWND)
         enums.load(app)
         return app
 
@@ -229,6 +249,26 @@ class Session:
             if wanted in (str(doc.Name).lower(), full, os.path.basename(full)):
                 return doc
         raise AcadError(f"No open drawing named '{name}'. Use list_documents to see what is open.")
+
+    def settle(self, fetch: Callable[[], T], what: str) -> T:
+        """Call fetch() until it succeeds SETTLE_CALLS times in a row, and return its last result.
+        Busy rejections start the count again; any other error is raised at once."""
+        deadline = time.monotonic() + SETTLE_TIMEOUT
+        ok, result = 0, None
+        while True:
+            try:
+                result = fetch()
+                ok += 1
+                if ok >= SETTLE_CALLS:
+                    return result
+            except (pywintypes.com_error, AttributeError) as err:
+                if not is_busy_error(err):
+                    raise
+                ok = 0
+                if time.monotonic() > deadline:
+                    raise AcadError(f"AutoCAD stayed busy for {SETTLE_TIMEOUT:.0f}s after {what}. Check "
+                                    "acad_status before trying again.") from None
+            time.sleep(SETTLE_PAUSE)
 
     def document(self, name: str = "") -> Any:
         if name:

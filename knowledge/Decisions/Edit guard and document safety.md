@@ -22,5 +22,16 @@ Owner: Alex
 - `insert_block` from a `.dwg` file leaves the new block definition in the drawing if the insert is rolled back.
 - The edit guard resets when the server restarts, which is intentional.
 
+## 2026-11-04: retried calls and cancel_command
+Status: **built, offline-tested; not live-verified** (Claude, on Alex's request "start on item 1 the busy handling"; see [[Projects/AutoCAD-MCP/Roadmap]]).
+- **Retried calls:** the COM worker installs a message filter. A call AutoCAD rejects with "retry later" is retried every 250 ms for up to 8 s (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`; 0 switches it off).
+  - A rejected call never ran, so a retry cannot repeat work.
+  - A call refused outright, or still rejected after the limit, fails as before.
+  - The busy guard is unchanged: `CMDACTIVE` and `IsQuiescent` still refuse edits while the user is busy. It may just take up to 8 s to say so.
+- **`new_drawing`** waits until the new drawing answers three calls in a row, 0.5 s apart (up to 45 s), before marking it as server-created.
+- **`cancel_command`** sends Esc twice as window messages, not COM, because COM is rejected while a prompt is open. It does not run on the COM worker. It refuses unless AutoCAD's window title shows a server-created drawing as the active one, so it cannot cancel the user's own command in their drawings. It is not for use while the user is working in a server-created drawing.
+- **verified 2026-11-04 (offline):** the filter's retry decisions; the filter registers as a COM object on an STA thread; the worker installs it (or not, with 0); `new_drawing` restarts its count after a rejection; `cancel_command` refuses user drawings and longer look-alike names, and sends WM_CHAR Esc twice for a server drawing.
+- **unresolved:** whether AutoCAD answers "retry later" (and not "rejected") in the cases seen live, and whether WM_CHAR Esc to the main window clears a prompt. Live script: `tests/live/busy_check.py`, to run only with Alex's go.
+
 ## Supersedes / superseded by
 None.

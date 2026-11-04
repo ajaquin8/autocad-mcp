@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from autocad_mcp import session as session_module  # noqa: E402
 from autocad_mcp.com import enums  # noqa: E402
 from autocad_mcp.session import session  # noqa: E402
 
@@ -304,4 +305,6 @@ def fake_app(monkeypatch):
     monkeypatch.setattr(session, "unlocked", set())
     monkeypatch.setattr(session, "allow_all_edits", False)
     monkeypatch.setattr(enums, "_values", {"acRed": 1, "acVpCustomScale": 1})
+    monkeypatch.setattr(session_module, "SETTLE_PAUSE", 0)
+    monkeypatch.setattr(session, "hwnd", None)
     return app

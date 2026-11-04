@@ -147,3 +147,14 @@ Writer: Claude Code side session (Alex: "One shared array", then "Saved, go" and
 Writer: Claude Code side session (Alex: "In general what improvements can we make … to reduce the amount of computer use", then "Yes, add them").
 - [[Projects/AutoCAD-MCP/Roadmap]]: new proposed section with five items, in order: busy handling (retry rejected calls, a cancel tool, settle after `new_drawing`); ownership across restarts; dynamic block place, test, inspect and Block Editor tools; experiments for dialog-only settings; an in-process .NET helper.
 - No code change.
+
+## 2026-11-04: busy handling (roadmap item 1)
+Writer: Claude Code side session (Alex: "start on item 1 the busy handling").
+- Code:
+  - `com.py`: a ctypes message filter on the COM worker retries "retry later" rejections for up to 8 s (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`).
+  - `session.py`: `settle()`, and AutoCAD's window handle remembered at connect.
+  - `new_drawing` waits for the new drawing to settle.
+  - New tool `cancel_command` (`tools/control.py`): Esc as window messages, only while a server-created drawing is active.
+  - Server instructions and README updated. [[Projects/AutoCAD-MCP/Tool reference]] regenerated (39 tools).
+- Docs: dated sections in [[Decisions/Edit guard and document safety]] and [[Projects/AutoCAD-MCP/Roadmap]]; a lesson in [[Research/AutoCAD API gotchas]].
+- Tests: 8 new offline tests (64 in total). Live script `tests/live/busy_check.py` written but **not run**: needs Alex's go.

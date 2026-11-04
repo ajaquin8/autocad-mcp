@@ -40,6 +40,10 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
 - **Edit guard:** only drawings created through the server (`new_drawing`) are editable. An
   existing drawing must be unlocked with `allow_edit_document`, which happens only when you ask.
 - **Busy guard:** edits are refused while you are in a command, prompt or dialog (`CMDACTIVE`).
+  When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
+  retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
+- **`cancel_command`** presses Esc to clear a prompt the server left open, and refuses unless the
+  active drawing is one the server created.
 - **One undo step per tool** (UNDO Begin/End marks). If a tool fails, what it created is deleted
   and what it changed is put back.
 - **No silent overwrites or discarded changes.** `close_document` only closes the server's own drawings.
@@ -50,9 +54,9 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-38 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
+39 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
 dimensions, leaders, blocks and attributes, moving/re-layering/deleting by handle, sheets (layouts,
-viewports at an exact scale, title blocks), queries, view capture and PDF plotting. The full list is
+viewports at an exact scale, title blocks), queries, view capture, PDF plotting and clearing a stuck prompt. The full list is
 generated from the code into
 [knowledge/Projects/AutoCAD-MCP/Tool reference.md](knowledge/Projects/AutoCAD-MCP/Tool%20reference.md).
 Coordinates are drawing units in WCS; angles are degrees.

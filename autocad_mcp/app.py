@@ -33,6 +33,10 @@ add_dimension / insert_block -> capture_view to check the result visually ->
 save_document. Each drawing tool is one undo step and is rolled back
 automatically if it fails. Results report entity handles; use them with
 get_entity, move_entities, change_properties and delete_entities.
+
+If AutoCAD keeps rejecting calls because a command or prompt the server started
+is still open in a server-created drawing, cancel_command presses Esc there. It
+never acts in the user's drawings; if the user is busy, ask them instead.
 """
 
 mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.3")

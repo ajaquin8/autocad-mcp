@@ -7,14 +7,17 @@ shipped to one dedicated thread and executed there in full.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import math
 import os
 import queue
 import threading
+import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
+from ctypes import wintypes
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -80,7 +83,8 @@ def rounded(values: Sequence[float], places: int = 6) -> list[float]:
 
 
 BUSY_MESSAGE = ("AutoCAD is busy and rejected the call (a command, dialog or prompt is probably "
-                "open). Ask the user to finish it or press Esc, then retry.")
+                "open; the server already waited a few seconds). Ask the user to finish it or press Esc, "
+                "then retry.")
 
 
 def describe_attribute_error(err: AttributeError) -> str:
@@ -111,6 +115,95 @@ def describe_com_error(err: pywintypes.com_error) -> str:
     return f"AutoCAD COM error 0x{(hresult or 0) & 0xFFFFFFFF:08X}: {msg}{(' - ' + detail) if detail else ''}"
 
 
+# ---------- retrying calls AutoCAD rejects ----------
+
+# IMessageFilter (objidl.h). pywin32 cannot implement it, so the filter is a tiny COM object built
+# with ctypes. COM asks the calling thread's filter what to do when a call is rejected; AutoCAD
+# answers "retry later" while it is opening a drawing, loading an add-in or just closing a dialog.
+SERVERCALL_RETRYLATER = 2
+PENDINGMSG_WAITDEFPROCESS = 2
+RETRY_PAUSE_MS = 250
+_CANCEL = 0xFFFFFFFF  # -1 as a DWORD: give up, the caller gets RPC_E_CALL_REJECTED
+_IID_IUNKNOWN = uuid.UUID("00000000-0000-0000-C000-000000000046").bytes_le
+_IID_IMESSAGEFILTER = uuid.UUID("00000016-0000-0000-C000-000000000046").bytes_le
+_S_OK, _E_NOINTERFACE = 0, 0x80004002 - 0x100000000
+
+_QI = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))
+_REF = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)
+_INCOMING = ctypes.WINFUNCTYPE(wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                               ctypes.c_void_p)
+_RETRY = ctypes.WINFUNCTYPE(wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD)
+_PENDING = ctypes.WINFUNCTYPE(wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD)
+
+
+class _Vtbl(ctypes.Structure):
+    _fields_ = [("QueryInterface", _QI), ("AddRef", _REF), ("Release", _REF),
+                ("HandleInComingCall", _INCOMING), ("RetryRejectedCall", _RETRY), ("MessagePending", _PENDING)]
+
+
+class _Obj(ctypes.Structure):
+    _fields_ = [("lpVtbl", ctypes.POINTER(_Vtbl))]
+
+
+def retry_seconds() -> float:
+    """How long a rejected call is retried (AUTOCAD_MCP_BUSY_RETRY_SECONDS, default 8, 0 = never)."""
+    try:
+        return max(0.0, float(os.environ.get("AUTOCAD_MCP_BUSY_RETRY_SECONDS", "8")))
+    except ValueError:
+        return 8.0
+
+
+class MessageFilter:
+    """Retries a call AutoCAD rejected with "retry later", for a limited time.
+
+    A rejected call never ran, so retrying it cannot repeat any work. A call AutoCAD
+    refuses outright, or one still rejected after the limit, fails as before, so the
+    busy guard (Session.require_idle) still refuses edits while the user is busy.
+    The object lives as long as the worker thread; AddRef/Release are no-ops.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.limit_ms = int(seconds * 1000)
+        self.retries = 0
+        self._vtbl = _Vtbl(_QI(self._query_interface), _REF(lambda this: 1), _REF(lambda this: 1),
+                           _INCOMING(lambda this, kind, caller, ticks, info: 0),  # SERVERCALL_ISHANDLED
+                           _RETRY(self._retry_rejected_call),
+                           _PENDING(lambda this, callee, ticks, kind: PENDINGMSG_WAITDEFPROCESS))
+        self._obj = _Obj(ctypes.pointer(self._vtbl))
+
+    @property
+    def address(self) -> int:
+        return ctypes.addressof(self._obj)
+
+    def delay(self, ticks: int, reject_type: int) -> int:
+        """Milliseconds to wait before retrying, or _CANCEL to give up."""
+        if reject_type != SERVERCALL_RETRYLATER or ticks >= self.limit_ms:
+            return _CANCEL
+        self.retries += 1
+        return RETRY_PAUSE_MS
+
+    def _retry_rejected_call(self, this: int, callee: int, ticks: int, reject_type: int) -> int:
+        return self.delay(ticks, reject_type)
+
+    def _query_interface(self, this: int, riid: int, ppv: Any) -> int:
+        if ctypes.string_at(riid, 16) in (_IID_IUNKNOWN, _IID_IMESSAGEFILTER):
+            ppv[0] = this
+            return _S_OK
+        ppv[0] = None
+        return _E_NOINTERFACE
+
+    def register(self) -> None:
+        """Install as the current (STA) thread's filter."""
+        previous = ctypes.c_void_p()
+        hr = ctypes.windll.ole32.CoRegisterMessageFilter(ctypes.c_void_p(self.address), ctypes.byref(previous))
+        if hr != _S_OK:
+            raise OSError(f"CoRegisterMessageFilter failed (0x{hr & 0xFFFFFFFF:08X})")
+
+    @staticmethod
+    def unregister() -> None:
+        ctypes.windll.ole32.CoRegisterMessageFilter(None, ctypes.byref(ctypes.c_void_p()))
+
+
 # ---------- the STA worker ----------
 
 
@@ -122,6 +215,7 @@ class ComWorker:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self.busy_with: str | None = None
+        self.message_filter: MessageFilter | None = None
 
     def _ensure_started(self) -> None:
         with self._lock:
@@ -131,6 +225,13 @@ class ComWorker:
 
     def _loop(self) -> None:
         pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        seconds = retry_seconds()
+        if seconds > 0:
+            try:
+                self.message_filter = MessageFilter(seconds)
+                self.message_filter.register()
+            except OSError:  # without it, a busy AutoCAD fails at once, as before
+                self.message_filter = None
         while True:
             fn, fut = self._queue.get()
             if not fut.set_running_or_notify_cancel():

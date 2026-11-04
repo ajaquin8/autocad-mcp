@@ -44,7 +44,7 @@ Why: in the screw-block work ([[Sources/2026-11-03 Dynamic block authoring]], [[
 - no MCP tool for the job, so raw commands were used;
 - settings that exist only in a dialog or the Properties palette.
 
-1. **Handle a busy AutoCAD inside the server** (small).
+1. **Handle a busy AutoCAD inside the server** (small). **2026-11-04: built and offline-tested; not live-verified** ([[Decisions/Edit guard and document safety]]; live script `tests/live/busy_check.py`).
    - **Retry rejected calls.** Register a COM message filter so that "Call was rejected by callee" is retried for a few seconds instead of failing. The busy guard is unchanged: a drawing that is in a command still refuses edits ([[Decisions/Edit guard and document safety]]).
    - **A cancel tool.** It sends Esc to AutoCAD's window (a window message, not COM) to clear a prompt the server itself left open. It must be used only while a server-created drawing is active, and never while the user's drawing is: Esc would cancel the user's own command.
    - **`new_drawing` waits until the new drawing answers** several calls in a row (add-ins load into each new drawing). This extends the 2026-11-03 fix item above.

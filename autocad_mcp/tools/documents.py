@@ -66,10 +66,19 @@ def new_drawing(template: str = "") -> dict:
     if template:
         if not template.lower().endswith(".dwt") or not os.path.exists(template):
             raise AcadError(f"Template not found or not a .dwt: {template}")
-        doc = app.Documents.Add(template)
+        added = app.Documents.Add(template)
     else:
-        doc = app.Documents.Add()
-    doc = session.find_document(str(doc.Name))
+        added = app.Documents.Add()
+    # AutoCAD can stay busy for seconds after Add (the drawing initialising, add-ins loading into it;
+    # verified 2026-11-03 and 2026-11-04): wait until the new drawing answers a few calls in a row.
+    name = session.settle(lambda: str(added.Name), "creating the drawing")
+
+    def answering() -> object:
+        doc = session.find_document(name)
+        doc.GetVariable("CMDACTIVE")
+        return doc
+
+    doc = session.settle(answering, f"creating '{name}'")
     session.mark_owned(doc)
     info = session.describe(doc)
     info["template"] = template or "(AutoCAD default)"
