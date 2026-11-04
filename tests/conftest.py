@@ -278,6 +278,12 @@ class FakeDocuments:
             Name = doc.Name
         return _Returned()
 
+    def Open(self, path: str, read_only: bool = False):  # noqa: N802
+        doc = FakeDoc(os.path.basename(path), path)
+        doc.ReadOnly = read_only
+        self.docs.append(doc)
+        return doc
+
 
 class FakeApp:
     """Just enough of AutoCAD.Application for Session and the tools."""

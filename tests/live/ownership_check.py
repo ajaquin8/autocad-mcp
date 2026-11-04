@@ -16,8 +16,10 @@ import os
 import sys
 
 import harness
+import pythoncom
 from harness import SCRATCH, check, step
 
+from autocad_mcp.com import MessageFilter, retry_seconds
 from autocad_mcp.session import doc_key, session
 from autocad_mcp.tools import documents
 
@@ -26,6 +28,8 @@ PATH = os.path.join(SCRATCH, f"{REPORT}.dwg")
 
 
 def main(phase: str) -> None:
+    pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+    MessageFilter(retry_seconds()).register()  # as the server's COM worker does
     session.connect()
     check("AutoCAD identity read", bool(session.identity), str(session.identity))
     if phase == "make":

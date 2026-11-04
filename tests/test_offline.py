@@ -672,3 +672,44 @@ def test_unlocks_are_not_kept_and_the_record_follows_save_as_and_close(fake_app)
 def test_no_record_without_an_autocad_identity(fake_app):
     documents.new_drawing()
     assert not session_module.OWNED_RECORD.exists()
+
+
+def test_open_drawing_waits_while_autocad_is_busy_and_stays_locked(fake_app, monkeypatch, tmp_path):
+    # Live 2026-11-04: the lookup right after Documents.Open failed although the drawing then opened.
+    path = tmp_path / "Part.dwg"
+    path.write_bytes(b"")
+    original_open = fake_app.Documents.Open
+
+    def slow_open(p, read_only=False):
+        doc = original_open(p, read_only)
+        real, calls = doc.GetVariable, {"n": 0}
+
+        def busy_first(name):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise AttributeError("<unknown>.GetVariable")
+            return real(name)
+        doc.GetVariable = busy_first
+        return doc
+
+    monkeypatch.setattr(fake_app.Documents, "Open", slow_open)
+    info = documents.open_drawing(str(path))
+    assert info["name"] == "Part.dwg" and info["editable"] is False and info["created_by_mcp"] is False
+
+
+def test_a_registered_filter_is_kept_alive():
+    import pythoncom
+    kept: list = []
+
+    def run() -> None:
+        pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        f = com.MessageFilter(1)
+        f.register()
+        kept.append(any(r is f for r in com._REGISTERED))
+        com.MessageFilter.unregister()
+        pythoncom.CoUninitialize()
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    assert kept == [True]

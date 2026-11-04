@@ -102,7 +102,16 @@ def open_drawing(path: str, read_only: bool = False) -> dict:
         raise AcadError(f"File not found: {path}")
     if session.documents():
         session.require_idle()
-    doc = session.find_document(str(session.app.Documents.Open(path, read_only).Name))
+    session.app.Documents.Open(path, read_only)
+
+    def answering() -> object:
+        doc = session.find_document(path)
+        doc.GetVariable("CMDACTIVE")
+        return doc
+
+    # Like new_drawing: AutoCAD can stay busy for a while after Open (verified 2026-11-04, where the
+    # lookup right after Open failed although the drawing then opened).
+    doc = session.settle(answering, f"opening '{os.path.basename(path)}'")
     return session.describe(doc)
 
 

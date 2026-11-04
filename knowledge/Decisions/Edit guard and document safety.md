@@ -38,7 +38,7 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Busy handling]
   - WM_CHAR or WM_KEYDOWN Esc posted to AutoCAD's main window did **not** clear the prompt; the WM_COPYDATA `^C^C` did.
 
 ## 2026-11-04: ownership across a server restart
-Status: **built, offline-tested; not live-verified** (Claude, on Alex's request "Yes, start item 2"; [[Projects/AutoCAD-MCP/Roadmap]] item 2).
+Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership across restarts]]) (Claude, on Alex's request "Yes, start item 2"; [[Projects/AutoCAD-MCP/Roadmap]] item 2).
 - **Why:** on 2026-11-04 the server restarted mid-work and could no longer save or close its own drawings with the guarded tools, so raw COM was used instead ([[Sources/2026-11-04 Dynamic block shared array]]).
 - **Rule:** a restarted server takes back a drawing only if it is still open in **the same AutoCAD**. The record (`%LOCALAPPDATA%\autocad-mcp\owned.json`) holds:
   - the AutoCAD process (process id and start time);
@@ -55,7 +55,7 @@ Status: **built, offline-tested; not live-verified** (Claude, on Alex's request 
   - nothing is written without an AutoCAD identity.
 
   The identity reader was checked on a real Windows window.
-- **unresolved:** live behaviour. Script `tests/live/ownership_check.py`, only with Alex's go.
+- **verified 2026-11-04 (live, AMCP-LIVE-20261104-05):** taken back in a new process; the user's drawing stays locked; a reopened file stays locked; the record is emptied on close. `open_drawing` now settles too, because the lookup right after Open failed live.
 
 ## Supersedes / superseded by
 None.

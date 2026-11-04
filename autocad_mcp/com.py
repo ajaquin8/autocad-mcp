@@ -145,6 +145,9 @@ class _Obj(ctypes.Structure):
     _fields_ = [("lpVtbl", ctypes.POINTER(_Vtbl))]
 
 
+_REGISTERED: list[MessageFilter] = []  # filters handed to COM; never freed while the process runs
+
+
 def retry_seconds() -> float:
     """How long a rejected call is retried (AUTOCAD_MCP_BUSY_RETRY_SECONDS, default 8, 0 = never)."""
     try:
@@ -195,11 +198,13 @@ class MessageFilter:
         return _E_NOINTERFACE
 
     def register(self) -> None:
-        """Install as the current (STA) thread's filter."""
+        """Install as the current (STA) thread's filter. COM keeps only a raw pointer, so the
+        filter is also kept alive here; one that Python freed crashed the process (2026-11-04)."""
         previous = ctypes.c_void_p()
         hr = ctypes.windll.ole32.CoRegisterMessageFilter(ctypes.c_void_p(self.address), ctypes.byref(previous))
         if hr != _S_OK:
             raise OSError(f"CoRegisterMessageFilter failed (0x{hr & 0xFFFFFFFF:08X})")
+        _REGISTERED.append(self)
 
     @staticmethod
     def unregister() -> None:

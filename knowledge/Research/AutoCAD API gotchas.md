@@ -103,3 +103,8 @@ Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to
 - **verified:** while a command waits at a prompt, AutoCAD rejects COM calls with "retry later" (SERVERCALL_RETRYLATER), not an outright refusal, so a message filter can wait them out.
 - **verified:** WM_CHAR or WM_KEYDOWN Esc posted to AutoCAD's main window does not cancel a prompt. Command-line input sent with WM_COPYDATA (COPYDATASTRUCT, dwData 1, a Unicode string) does: `""` (^C^C) cleared LINE at its first prompt.
 - **verified:** `Session.connect()` fails while a prompt is open, because loading the enum cache reads `app.Version`. Keep the window handle from an earlier connection.
+
+## 2026-11-04: ownership and opening ([[Sources/2026-11-04 Ownership across restarts]])
+- **verified:** `Document.HWND` gives each open drawing its own window handle, and a file closed and opened again gets a new one. Together with the AutoCAD process id and start time, that identifies "the same open drawing" across a server restart.
+- **verified:** like `Documents.Add`, `Documents.Open` can return before AutoCAD answers calls about the new drawing. Wait until it answers several calls in a row.
+- **verified:** COM holds only a raw pointer to a message filter. If Python frees the ctypes object, the next rejected call crashes the process, so keep registered filters referenced for the life of the process.

@@ -163,4 +163,4 @@ Writer: Claude Code side session (Alex: "start on item 1 the busy handling").
 Writer: Claude Code side session (Alex: "Yes, start item 2").
 - Code (`session.py`): a record of the server-created drawings, kept in `%LOCALAPPDATA%\autocad-mcp\owned.json`. A restarted server takes back only drawings still open in the same AutoCAD (same process and start time, same key, same `Document.HWND`). The record is updated on create, Save As and close.
 - README Safety section and [[Decisions/Edit guard and document safety]] updated (dated section; the "resets on restart" rule is narrowed, not dropped); [[Projects/AutoCAD-MCP/Roadmap]] item 2 status.
-- Tests: 4 new offline tests (68 in total). Live script `tests/live/ownership_check.py` written, **not run**.
+- Tests: 6 new offline tests (70 in total). Live: [[Sources/2026-11-04 Ownership across restarts]] (AMCP-LIVE-20261104-05). It also fixed `open_drawing`, which now waits for the opened drawing to settle, and made `MessageFilter.register()` keep registered filters alive after a one-off script crashed.
