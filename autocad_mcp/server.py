@@ -8,6 +8,7 @@ from .app import mcp
 from .tools import (  # noqa: F401
     annotate,
     blocks,
+    control,
     documents,
     draw,
     edit,

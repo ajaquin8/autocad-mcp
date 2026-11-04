@@ -18,7 +18,7 @@ from autocad_mcp.app import _render, _where
 from autocad_mcp.com import AcadError, AcadTimeout, ComWorker, deg, rad, xyz
 from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
-from autocad_mcp.tools import annotate, documents, draw, edit, entities, layers, query, settings, sheets
+from autocad_mcp.tools import annotate, control, documents, draw, edit, entities, layers, query, settings, sheets
 
 # ---------- coordinates ----------
 
@@ -480,3 +480,140 @@ def test_current_styles_switch_and_roll_back(fake_app):
         settings.set_current_styles(multileader_style="Standard", text_style="Arial")
     assert fake_app.doc.variables["CMLEADERSTYLE"] == "NOTES"  # nothing half-done
 
+
+
+# ---------- busy handling: retried calls, settling new drawings, cancel ----------
+
+
+def test_message_filter_retries_only_retry_later_within_the_limit():
+    f = com.MessageFilter(2)
+    assert f.delay(100, com.SERVERCALL_RETRYLATER) == com.RETRY_PAUSE_MS
+    assert f.delay(2500, com.SERVERCALL_RETRYLATER) == com._CANCEL  # waited long enough: give up
+    assert f.delay(100, 1) == com._CANCEL  # SERVERCALL_REJECTED: AutoCAD refused outright, never retried
+    assert f.retries == 1
+
+
+def test_message_filter_is_a_working_com_object_on_an_sta_thread():
+    import ctypes
+
+    import pythoncom
+    out: dict = {}
+
+    def run() -> None:
+        pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        try:
+            f = com.MessageFilter(1)
+            f.register()
+            vtbl = f._vtbl
+            out["retry"] = vtbl.RetryRejectedCall(f.address, None, 10, com.SERVERCALL_RETRYLATER)
+            iid = ctypes.create_string_buffer(com._IID_IMESSAGEFILTER, 16)
+            ppv = ctypes.c_void_p()
+            out["qi"] = vtbl.QueryInterface(f.address, ctypes.addressof(iid), ctypes.byref(ppv))
+            out["same"] = ppv.value == f.address
+            other = ctypes.create_string_buffer(b"\x01" * 16, 16)
+            out["other"] = vtbl.QueryInterface(f.address, ctypes.addressof(other), ctypes.byref(ppv))
+            com.MessageFilter.unregister()
+        finally:
+            pythoncom.CoUninitialize()
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    assert out == {"retry": com.RETRY_PAUSE_MS, "qi": 0, "same": True, "other": com._E_NOINTERFACE}
+
+
+def test_worker_installs_the_filter_unless_switched_off(monkeypatch):
+    w = ComWorker()
+    assert w.call(lambda: w.message_filter is not None)
+    monkeypatch.setenv("AUTOCAD_MCP_BUSY_RETRY_SECONDS", "0")
+    off = ComWorker()
+    assert off.call(lambda: off.message_filter is None)
+
+
+def test_new_drawing_waits_while_autocad_is_busy(fake_app, monkeypatch):
+    # Live 2026-11-04: an add-in loading into the new drawing rejected calls after it first answered.
+    original_add = fake_app.Documents.Add
+
+    def add(*args):
+        returned = original_add(*args)
+        new = fake_app.Documents.docs[-1]
+        real, new.calls = new.GetVariable, {"n": 0}
+
+        def busy_then_ok(name):
+            new.calls["n"] += 1
+            if new.calls["n"] in (1, 3):  # rejected, answered, rejected again, then steady
+                raise AttributeError("<unknown>.GetVariable")
+            return real(name)
+        new.GetVariable = busy_then_ok
+        return returned
+
+    monkeypatch.setattr(fake_app.Documents, "Add", add)
+    info = documents.new_drawing()
+    new = fake_app.Documents.docs[-1]
+    assert info["editable"] and info["name"] == new.Name
+    assert new.calls["n"] >= 6  # the count of good answers started again after the second rejection
+
+
+def test_settle_gives_up_with_a_clear_message_and_passes_other_errors(fake_app, monkeypatch):
+    monkeypatch.setattr(session_module, "SETTLE_TIMEOUT", 0)
+
+    def busy():
+        raise _com_error(-2147418111)
+    with pytest.raises(AcadError, match="stayed busy"):
+        session.settle(busy, "creating the drawing")
+
+    def broken():
+        raise AttributeError("'NoneType' object has no attribute 'Name'")
+    with pytest.raises(AttributeError):
+        session.settle(broken, "creating the drawing")
+
+
+class _Window:
+    def __init__(self, title: str) -> None:
+        self.title, self.posted = title, []
+
+    def IsWindow(self, hwnd):  # noqa: N802 - mirrors win32gui
+        return True
+
+    def GetWindowText(self, hwnd):  # noqa: N802
+        return self.title
+
+    def send(self, hwnd, text):
+        self.posted.append((hwnd, text))
+        return True
+
+
+def test_cancel_needs_a_connection(fake_app):
+    with pytest.raises(AcadError, match="acad_status first"):
+        control.cancel()
+
+
+def test_cancel_refuses_when_a_user_drawing_is_active(fake_app, monkeypatch):
+    window = _Window("Autodesk AutoCAD 2026  Plan.dwg")
+    monkeypatch.setattr(control, "win32gui", window)
+    monkeypatch.setattr(control, "send_input", window.send)
+    monkeypatch.setattr(session, "hwnd", 1234)
+    session.mark_owned(fake_app.doc)  # Drawing1.dwg is ours, but it is not the active one
+    with pytest.raises(ToolError, match="Refused.*user's own command"):
+        asyncio.run(mcp.call_tool("cancel_command", {}))
+    window.title = "Autodesk AutoCAD 2026  MyDrawing1.dwg"  # a longer name ending the same way
+    with pytest.raises(AcadError, match="Refused"):
+        control.cancel()
+    assert window.posted == []
+
+
+def test_cancel_sends_two_ctrl_c_when_a_server_drawing_is_active(fake_app, monkeypatch):
+    # Live 2026-11-04 the title read "<product> - [Drawing35.dwg]"; ^C^C by WM_COPYDATA cleared LINE.
+    window = _Window("Autodesk AutoCAD 2026 - [Drawing1.dwg]")
+    monkeypatch.setattr(control, "win32gui", window)
+    monkeypatch.setattr(control, "send_input", window.send)
+    monkeypatch.setattr(session, "hwnd", 1234)
+    session.mark_owned(fake_app.doc)
+    assert "Cancelled the command in 'drawing1.dwg'" in control.cancel()
+    assert window.posted == [(1234, "")]
+    window.title = "Autodesk AutoCAD 2026  Drawing1.dwg"
+    control.cancel()
+    assert len(window.posted) == 2
+    monkeypatch.setattr(control, "send_input", lambda hwnd, text: False)
+    with pytest.raises(AcadError, match="did not accept"):
+        control.cancel()

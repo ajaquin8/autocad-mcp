@@ -94,3 +94,12 @@ Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to
 - **verified:** the console engine has no `getpropertyvalue`, `setpropertyvalue` or `dumpallproperties`, so it cannot set dynamic properties; structural checks go through DXFOUT. `QUIT` on a never-saved drawing asks "Really want to discard all changes?", and the answer is `Y`.
 - **verified:** a third-party add-in that loads into each new drawing can make AutoCAD reject COM calls ("Call was rejected by callee") for several seconds after `new_drawing`. Wait until a few calls in a row succeed.
 - **verified:** Windows PowerShell 5.1 strips embedded double quotes from arguments passed to native programs, so AutoLISP passed as an argument arrives broken. Pass it from a file or another shell.
+
+## 2026-11-04: a COM message filter from Python
+- **verified (offline):** pywin32 cannot implement `IMessageFilter`: it has no `CoRegisterMessageFilter` and no gateway for the interface. A filter built with `ctypes` (a six-entry vtable, registered with `ole32.CoRegisterMessageFilter` on the STA thread) works without a new dependency. Keep the Python object alive as long as the thread, and make AddRef/Release no-ops.
+- **inferred:** a filter is per thread. Live scripts that call tool functions on their own thread need their own filter, which the server's COM worker does not give them.
+
+## 2026-11-04: cancelling a prompt without COM ([[Sources/2026-11-04 Busy handling]])
+- **verified:** while a command waits at a prompt, AutoCAD rejects COM calls with "retry later" (SERVERCALL_RETRYLATER), not an outright refusal, so a message filter can wait them out.
+- **verified:** WM_CHAR or WM_KEYDOWN Esc posted to AutoCAD's main window does not cancel a prompt. Command-line input sent with WM_COPYDATA (COPYDATASTRUCT, dwData 1, a Unicode string) does: `""` (^C^C) cleared LINE at its first prompt.
+- **verified:** `Session.connect()` fails while a prompt is open, because loading the enum cache reads `app.Version`. Keep the window handle from an earlier connection.
