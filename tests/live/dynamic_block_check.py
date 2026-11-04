@@ -8,8 +8,8 @@ e.g. ... screw.dwg Size "#8-18" "1/4-14" Length 1 2
 
 Everything happens in a new scratch drawing, which is closed without saving at the end. The block
 file is only inserted, never changed. Nothing about the block is hard-coded here: the checks are
-that values read back as set, the width changes with the list value, the height grows by exactly the
-distance change, measuring leaves nothing behind, and the attributes follow the change.
+that values read back as set, the width changes with the list value, the block grows by exactly the
+distance change at its far end, measuring leaves nothing behind, and the attributes follow the change.
 """
 
 from __future__ import annotations
@@ -59,9 +59,13 @@ def main(path: str, list_prop: str, a: str, b: str, dist_prop: str, d1: str, d2:
             print("extents:", e1, "->", e2)
             check("width changes with the list value", abs(e1["width"] - e2["width"]) > 1e-6,
                   f"{e1['width']} -> {e2['width']}")
-            grew = round(e2["height"] - e1["height"], 6)
-            check("height grows by the distance change", abs(grew - (blocks.number(d2) - blocks.number(d1))) < 1e-4,
-                  f"{grew} vs {blocks.number(d2) - blocks.number(d1)}")
+            # The far end (lowest point from the insertion point) moves by the distance change; the overall
+            # height also changes with the list value (a bigger head), so it is not the measure here.
+            low1 = m1["extents_from_insertion_point"]["min"][1]
+            low2 = m2["extents_from_insertion_point"]["min"][1]
+            moved = round(low1 - low2, 6)
+            check("far end moves by the distance change", abs(moved - (blocks.number(d2) - blocks.number(d1))) < 1e-4,
+                  f"{low1} -> {low2}")
         labels_2 = blocks.get_block_properties(handle, name=scratch)["attributes"]
         print("attributes:", labels_1, "->", labels_2)
         check("attributes follow the change", labels_1 != labels_2 or not labels_1, "")

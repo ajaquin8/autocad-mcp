@@ -173,4 +173,4 @@ Writer: Claude Code side session (Alex: "Yes lets do that next").
   - `measure_block`: explodes a temporary copy, reports the visible extents and counts (optionally the geometry), then deletes it. Server-created drawings only.
   - `insert_block` takes `dynamic_properties`.
 - [[Projects/AutoCAD-MCP/Tool reference]] regenerated (42 tools); README and [[Projects/AutoCAD-MCP/Roadmap]] item 3 status updated.
-- Tests: 7 new offline tests (77 in total). Live script `tests/live/dynamic_block_check.py` (generic: block file and values on the command line), **not run**.
+- Tests: 7 new offline tests (77 in total). Live: [[Sources/2026-11-04 Dynamic block tools]] (AMCP-LIVE-20261104-06), 13/13. The first run's one miss was the script's own height check, now a tip check.
