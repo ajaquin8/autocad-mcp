@@ -47,9 +47,67 @@ class FakeEntity:
         return (0.0, 0.0, 0.0), (1.0, 1.0, 0.0)
 
 
+class FakeLine(FakeEntity):
+    def GetBoundingBox(self):  # noqa: N802
+        (x1, y1, _), (x2, y2, _) = self.StartPoint, self.EndPoint
+        return (min(x1, x2), min(y1, y2), 0.0), (max(x1, x2), max(y1, y2), 0.0)
+
+
+class FakeDynProp:
+    def __init__(self, name: str, value, allowed=(), show: bool = True) -> None:
+        self.PropertyName, self.Value, self.AllowedValues, self.Show, self.ReadOnly = name, value, allowed, show, False
+
+
+class FakeAttribute:
+    def __init__(self, tag: str, text: str, invisible: bool) -> None:
+        self.TagString, self.TextString, self.Invisible = tag, text, invisible
+
+    def Update(self) -> None:  # noqa: N802
+        pass
+
+
+class FakeBlockRef(FakeEntity):
+    """A placed screw block: Size (lookup) sets the width, Length the tip; Visibility1 is a hidden helper."""
+
+    WIDTHS = {"#8-18": 0.348, "#10-16": 0.414, "#12-14": 0.432}
+
+    def __init__(self, doc: FakeDoc, block: str, insertion) -> None:
+        super().__init__(doc, "AcDbBlockReference", Name="*U12", EffectiveName=block, IsDynamicBlock=True,
+                         InsertionPoint=tuple(insertion), HasAttributes=True, Rotation=0.0,
+                         XScaleFactor=1.0, YScaleFactor=1.0, ZScaleFactor=1.0)
+        self.props = [FakeDynProp("Size", "#12-14", tuple(self.WIDTHS)),
+                      FakeDynProp("Length", 1.0, (0.5, 0.75, 1.0, 1.25, 2.0)),
+                      FakeDynProp("Visibility1", "#12-14", tuple(self.WIDTHS), show=False),
+                      FakeDynProp("Origin", (0.0, 0.0), show=False)]
+        self.atts = [FakeAttribute("CALLOUT", "#12-14 x 1\" HWH TEK", True), FakeAttribute("SPEC", "", True)]
+
+    def GetDynamicBlockProperties(self):  # noqa: N802
+        return list(self.props)
+
+    def GetAttributes(self):  # noqa: N802
+        return list(self.atts)
+
+    def value(self, name: str):
+        return next(p.Value for p in self.props if p.PropertyName == name)
+
+    def Explode(self):  # noqa: N802
+        x, y, _ = self.InsertionPoint
+        half = self.WIDTHS[self.value("Size")] / 2
+        space = self._space
+        parts = [FakeLine(self._doc, "AcDbLine", StartPoint=(x - half, y, 0.0), EndPoint=(x + half, y, 0.0)),
+                 FakeLine(self._doc, "AcDbLine", StartPoint=(x, y, 0.0), EndPoint=(x, y - self.value("Length"), 0.0)),
+                 FakeEntity(self._doc, "AcDbAttributeDefinition")]
+        for p in parts:
+            space._add(p)
+        return parts
+
+
 class FakeSpace:
     def __init__(self, doc: FakeDoc) -> None:
         self.doc, self.items = doc, []
+
+    def InsertBlock(self, insertion, block, xs, ys, zs, rotation):  # noqa: N802
+        return self._add(FakeBlockRef(self.doc, block, _xyz(insertion)))
 
     @property
     def Count(self) -> int:  # noqa: N802
