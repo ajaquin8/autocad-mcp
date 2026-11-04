@@ -20,7 +20,7 @@ Owner: Alex
 ## Known gaps
 - `delete_entities` cannot be rolled back by the server if it fails halfway (Ctrl+Z can).
 - `insert_block` from a `.dwg` file leaves the new block definition in the drawing if the insert is rolled back.
-- The edit guard resets when the server restarts, which is intentional.
+- The edit guard resets when the server restarts, which is intentional. **Narrowed 2026-11-04:** see the dated section below.
 
 ## 2026-11-04: retried calls and cancel_command
 Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Busy handling]]) (Claude, on Alex's request "start on item 1 the busy handling"; see [[Projects/AutoCAD-MCP/Roadmap]]).
@@ -36,6 +36,26 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Busy handling]
   - `new_drawing` settled a new drawing.
   - `cancel_command` refused while the user's drawing was active, and cleared LINE waiting at its first prompt in a server drawing.
   - WM_CHAR or WM_KEYDOWN Esc posted to AutoCAD's main window did **not** clear the prompt; the WM_COPYDATA `^C^C` did.
+
+## 2026-11-04: ownership across a server restart
+Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership across restarts]]) (Claude, on Alex's request "Yes, start item 2"; [[Projects/AutoCAD-MCP/Roadmap]] item 2).
+- **Why:** on 2026-11-04 the server restarted mid-work and could no longer save or close its own drawings with the guarded tools, so raw COM was used instead ([[Sources/2026-11-04 Dynamic block shared array]]).
+- **Rule:** a restarted server takes back a drawing only if it is still open in **the same AutoCAD**. The record (`%LOCALAPPDATA%\autocad-mcp\owned.json`) holds:
+  - the AutoCAD process (process id and start time);
+  - each server-created drawing's key (path, or name while never saved);
+  - its document window (`Document.HWND`, documented in the ActiveX reference).
+
+  All three must match. A file closed and opened again gets a new window and stays locked, and after AutoCAD restarts nothing is taken back. Stale entries are dropped. Unlocks from `allow_edit_document` are never kept: they stay per server session, as before.
+- **Known gap:** one record per PC. If two server processes run at once, the one that saves last overwrites the other's entries. That loses only the other's restart memory; it never makes a drawing editable.
+- **verified 2026-11-04 (offline):**
+  - taken back after a restart;
+  - a reopened file, or another AutoCAD, stays locked, and the stale record is dropped;
+  - unlocks are not kept;
+  - the record follows Save As and close;
+  - nothing is written without an AutoCAD identity.
+
+  The identity reader was checked on a real Windows window.
+- **verified 2026-11-04 (live, AMCP-LIVE-20261104-05):** taken back in a new process; the user's drawing stays locked; a reopened file stays locked; the record is emptied on close. `open_drawing` now settles too, because the lookup right after Open failed live.
 
 ## Supersedes / superseded by
 None.

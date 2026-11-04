@@ -1,25 +1,30 @@
 """Connection to the running AutoCAD plus the edit and busy guards.
 
-Edit guard: a drawing may only be changed if this server created it during the
-current session, or if it was explicitly unlocked with allow_edit_document
-(which the model should only call after the user asked for that drawing to be
-changed). Everything in here runs on the COM worker thread.
+Edit guard: a drawing may only be changed if this server created it (and it is
+still open in the same AutoCAD, also across a server restart), or if it was
+explicitly unlocked with allow_edit_document in this server session (which the
+model should only call after the user asked for that drawing to be changed).
+Everything in here runs on the COM worker thread.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import time
 import winreg
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any, TypeVar
 
 import pythoncom
 import pywintypes
+import win32api
 import win32com.client
 import win32com.client.dynamic
+import win32process
 
 from .com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, enums
 
@@ -31,6 +36,35 @@ T = TypeVar("T")
 SETTLE_CALLS = 3
 SETTLE_PAUSE = 0.5
 SETTLE_TIMEOUT = 45.0
+
+
+# Which open drawings this server created, kept so a restarted server can take them back. A drawing
+# counts only while it stays open in the same AutoCAD: the record names the AutoCAD process (id and
+# start time) and each drawing's key and document window, which is new whenever a drawing is opened.
+OWNED_RECORD = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "owned.json"
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def acad_identity(app: Any) -> str | None:
+    """'<process id>@<start time>' of the running AutoCAD, or None if it cannot be read."""
+    try:
+        _, pid = win32process.GetWindowThreadProcessId(int(app.HWND))
+        handle = win32api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        try:
+            started = win32process.GetProcessTimes(handle)["CreationTime"]
+        finally:
+            win32api.CloseHandle(handle)
+        return f"{pid}@{started.isoformat()}"
+    except Exception:  # noqa: BLE001 - without it, ownership simply does not survive a restart
+        return None
+
+
+def doc_window(doc: Any) -> int | None:
+    """The drawing's document window (Document.HWND), or None if AutoCAD does not say."""
+    try:
+        return int(doc.HWND)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def is_busy_error(err: BaseException) -> bool:
@@ -181,6 +215,8 @@ class Session:
         self.unlocked: set[str] = set()
         self.allow_all_edits = _env_flag("AUTOCAD_MCP_ALLOW_ALL_EDITS")
         self.hwnd: int | None = None  # AutoCAD's main window, for cancel_command (which uses no COM)
+        self.identity: str | None = None  # which AutoCAD process the ownership record belongs to
+        self.owned_windows: dict[str, int] = {}  # owned key -> document window, for the record
 
     # ---------- connection ----------
 
@@ -227,6 +263,9 @@ class Session:
         with contextlib.suppress(pywintypes.com_error, AttributeError, TypeError, ValueError):
             self.hwnd = int(app.HWND)
         enums.load(app)
+        self.identity = acad_identity(app)
+        with contextlib.suppress(Exception):  # a busy AutoCAD must not stop the connection
+            self.restore_owned()
         return app
 
     @property
@@ -312,7 +351,12 @@ class Session:
                             "Ask the user to finish it, then retry.")
 
     def mark_owned(self, doc: Any) -> None:
-        self.owned.add(doc_key(doc))
+        key = doc_key(doc)
+        self.owned.add(key)
+        window = doc_window(doc)
+        if window is not None:
+            self.owned_windows[key] = window
+        self._save_owned()
 
     def rekey(self, old_key: str, doc: Any) -> None:
         """A drawing was saved under a new path: keep its edit permission."""
@@ -321,10 +365,44 @@ class Session:
             if old_key in keys:
                 keys.discard(old_key)
                 keys.add(new_key)
+        if old_key in self.owned_windows:
+            self.owned_windows[new_key] = self.owned_windows.pop(old_key)
+            self._save_owned()
 
     def forget(self, key: str) -> None:
         self.owned.discard(key)
         self.unlocked.discard(key)
+        if self.owned_windows.pop(key, None) is not None:
+            self._save_owned()
+
+    def restore_owned(self) -> list[str]:
+        """After a server restart, take back the drawings this server created that are still open
+        in the same AutoCAD: same process, same name or path, same document window. A drawing that
+        was closed and opened again, or any drawing after AutoCAD restarted, stays locked. Unlocks
+        from allow_edit_document are never restored. Returns the names taken back."""
+        try:
+            record = json.loads(OWNED_RECORD.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        restored = []
+        if self.identity and record.get("autocad") == self.identity:
+            wanted = {(d.get("key"), d.get("window")) for d in record.get("drawings", [])}
+            for doc in self.documents():
+                key, window = doc_key(doc), doc_window(doc)
+                if window is not None and (key, window) in wanted:
+                    self.owned.add(key)
+                    self.owned_windows[key] = window
+                    restored.append(str(doc.Name))
+        self._save_owned()  # drops whatever was not taken back
+        return restored
+
+    def _save_owned(self) -> None:
+        if not self.identity:
+            return
+        drawings = [{"key": k, "window": w} for k, w in self.owned_windows.items() if k in self.owned]
+        with contextlib.suppress(OSError):
+            OWNED_RECORD.parent.mkdir(parents=True, exist_ok=True)
+            OWNED_RECORD.write_text(json.dumps({"autocad": self.identity, "drawings": drawings}), encoding="utf-8")
 
     @contextlib.contextmanager
     def edit(self, doc: Any = None) -> Iterator[Edit]:
