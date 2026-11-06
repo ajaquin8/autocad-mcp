@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from ..app import acad_tool
-from ..com import AcadError
+from ..com import AcadError, worker
 from ..session import doc_key, product_name, session
 
 
@@ -18,17 +18,20 @@ def acad_status(start_if_needed: bool = False) -> dict:
     Args:
         start_if_needed: launch AutoCAD if it is not running (default False).
     """
-    app = session.connect(start=start_if_needed) if (start_if_needed or not session.connected) else session.app
-    docs = session.documents()
-    active = app.ActiveDocument if docs else None
-    return {
-        "autocad": product_name(str(app.Version)),
-        "autocad_version": str(app.Version),
-        "active_drawing": str(active.Name) if active is not None else None,
-        "active_units": session.units(active) if active is not None else None,
-        "open_drawings": [session.describe(d) for d in docs],
-        "edit_guard": "off (AUTOCAD_MCP_ALLOW_ALL_EDITS)" if session.allow_all_edits else "on",
-    }
+    if start_if_needed or not session.connected:
+        app = session.connect(start=start_if_needed)
+    with worker.quick_retries():  # a status poll: fail fast (and name any dialog) while AutoCAD is stuck
+        app = session.app
+        docs = session.documents()
+        active = app.ActiveDocument if docs else None
+        return {
+            "autocad": product_name(str(app.Version)),
+            "autocad_version": str(app.Version),
+            "active_drawing": str(active.Name) if active is not None else None,
+            "active_units": session.units(active) if active is not None else None,
+            "open_drawings": [session.describe(d) for d in docs],
+            "edit_guard": "off (AUTOCAD_MCP_ALLOW_ALL_EDITS)" if session.allow_all_edits else "on",
+        }
 
 
 @acad_tool(read_only=True)

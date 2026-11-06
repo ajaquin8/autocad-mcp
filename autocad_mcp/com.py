@@ -7,6 +7,7 @@ shipped to one dedicated thread and executed there in full.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import json
 import math
@@ -14,7 +15,7 @@ import os
 import queue
 import threading
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from ctypes import wintypes
@@ -148,6 +149,12 @@ class _Obj(ctypes.Structure):
 _REGISTERED: list[MessageFilter] = []  # filters handed to COM; never freed while the process runs
 
 
+# Status polls (acad_status, the checks run_command makes after a command) give up after this long
+# instead of the full retry time: while a command waits for input AutoCAD rejects every call, and a
+# poll that waits 8 s per call only makes a stuck command look like a hung server.
+QUICK_RETRY_SECONDS = 1.0
+
+
 def retry_seconds() -> float:
     """How long a rejected call is retried (AUTOCAD_MCP_BUSY_RETRY_SECONDS, default 8, 0 = never)."""
     try:
@@ -250,6 +257,20 @@ class ComWorker:
                 fut.set_exception(exc)
             finally:
                 self.busy_with = None
+
+    @contextlib.contextmanager
+    def quick_retries(self, seconds: float = QUICK_RETRY_SECONDS) -> Iterator[None]:
+        """Retry rejected calls for at most `seconds` inside this block (on the worker thread)."""
+        f = self.message_filter
+        if f is None:
+            yield
+            return
+        previous = f.limit_ms
+        f.limit_ms = min(previous, int(seconds * 1000))
+        try:
+            yield
+        finally:
+            f.limit_ms = previous
 
     def call(self, fn: Callable[[], T], timeout: float = 180.0) -> T:
         self._ensure_started()

@@ -14,7 +14,9 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from .com import AcadError, describe_attribute_error, describe_com_error, worker
+from .com import AcadError, AcadTimeout, describe_attribute_error, describe_com_error, worker
+from .session import is_busy_error, session
+from .winui import describe_blockers
 
 INSTRUCTIONS = """\
 Drives the AutoCAD session already running on this PC (acad_status reports the version).
@@ -36,7 +38,8 @@ get_entity, move_entities, change_properties and delete_entities.
 
 If AutoCAD keeps rejecting calls because a command or prompt the server started
 is still open in a server-created drawing, cancel_command cancels it there. It
-never acts in the user's drawings; if the user is busy, ask them instead.
+never acts in the user's drawings; if the user is busy, ask them instead. When a
+busy error names an AutoCAD dialog, only the user can answer it.
 """
 
 mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.3")
@@ -49,6 +52,13 @@ def _where(err: BaseException) -> str:
         return ""
     f = frames[-1]
     return f" [at {f.filename.rsplit(chr(92), 1)[-1]}:{f.lineno} {f.name}: {(f.line or '').strip()[:120]}]"
+
+
+def _blockers(err: BaseException) -> str:
+    """For a busy or timed-out call: which AutoCAD dialog is in the way, if one is (no COM)."""
+    if isinstance(err, AcadTimeout) or is_busy_error(err):
+        return describe_blockers(session.hwnd)
+    return ""
 
 
 def _render(result: Any) -> Any:
@@ -71,11 +81,11 @@ def acad_tool(*, read_only: bool = False, destructive: bool = False,
                 return await anyio.to_thread.run_sync(
                     lambda: worker.call(run, timeout=timeout), abandon_on_cancel=True)
             except AcadError as err:
-                raise ToolError(str(err)) from None
+                raise ToolError(str(err) + _blockers(err)) from None
             except pywintypes.com_error as err:
-                raise ToolError(describe_com_error(err) + _where(err)) from None
+                raise ToolError(describe_com_error(err) + _blockers(err) + _where(err)) from None
             except AttributeError as err:
-                raise ToolError(describe_attribute_error(err) + _where(err)) from None
+                raise ToolError(describe_attribute_error(err) + _blockers(err) + _where(err)) from None
             except (ValueError, KeyError, IndexError, TypeError) as err:
                 raise ToolError(f"{type(err).__name__}: {err}{_where(err)}") from None
 

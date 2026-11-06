@@ -21,11 +21,10 @@ from typing import Any, TypeVar
 
 import pythoncom
 import pywintypes
-import win32api
 import win32com.client
 import win32com.client.dynamic
-import win32process
 
+from . import winui
 from .com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, enums
 
 T = TypeVar("T")
@@ -42,21 +41,46 @@ SETTLE_TIMEOUT = 45.0
 # counts only while it stays open in the same AutoCAD: the record names the AutoCAD process (id and
 # start time) and each drawing's key and document window, which is new whenever a drawing is opened.
 OWNED_RECORD = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "owned.json"
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
 def acad_identity(app: Any) -> str | None:
     """'<process id>@<start time>' of the running AutoCAD, or None if it cannot be read."""
     try:
-        _, pid = win32process.GetWindowThreadProcessId(int(app.HWND))
-        handle = win32api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        try:
-            started = win32process.GetProcessTimes(handle)["CreationTime"]
-        finally:
-            win32api.CloseHandle(handle)
-        return f"{pid}@{started.isoformat()}"
+        return winui.process_identity(int(app.HWND))
     except Exception:  # noqa: BLE001 - without it, ownership simply does not survive a restart
         return None
+
+
+def recorded_owned_keys(main: int) -> set[str]:
+    """Drawings the ownership record lists for the AutoCAD that owns this main window, read without
+    COM (cancel_command must work while AutoCAD rejects COM calls). The server's own scripts write
+    the same record, so this also finds drawings they created. A drawing counts only while its
+    document window still exists in that same AutoCAD process."""
+    try:
+        record = json.loads(OWNED_RECORD.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    identity = winui.process_identity(main)
+    if not identity or record.get("autocad") != identity:
+        return set()
+    pid = winui.window_pid(main)
+    keys = set()
+    for drawing in record.get("drawings", []):
+        key, window = drawing.get("key"), drawing.get("window")
+        if isinstance(key, str) and isinstance(window, int) and winui.window_pid(window) == pid:
+            keys.add(key)
+    return keys
+
+
+# CMDACTIVE bits (AutoCAD system variable reference).
+CMDACTIVE_BITS = {1: "a command", 2: "a transparent command", 4: "a script", 8: "a dialog box",
+                  16: "a DDE exchange", 32: "an AutoLISP expression", 64: "an ObjectARX command"}
+
+
+def describe_cmdactive(value: int) -> str:
+    """'a command and an AutoLISP expression' for CMDACTIVE 33."""
+    names = [text for bit, text in CMDACTIVE_BITS.items() if value & bit]
+    return " and ".join(names) if names else "something"
 
 
 def doc_window(doc: Any) -> int | None:
@@ -339,9 +363,9 @@ class Session:
         active = int(doc.GetVariable("CMDACTIVE"))
         if active:
             raise AcadError(
-                f"The user is busy in AutoCAD (CMDACTIVE={active}: a command, script or dialog is "
+                f"The user is busy in AutoCAD (CMDACTIVE={active}: {describe_cmdactive(active)} is "
                 "active). Ask them to finish or press Esc, then retry. Never edit while a user "
-                "command is running.")
+                "command is running." + winui.describe_blockers(self.hwnd))
         try:
             quiescent = bool(self.app.GetAcadState().IsQuiescent)
         except Exception:  # noqa: BLE001 - optional second opinion

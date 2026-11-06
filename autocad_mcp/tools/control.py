@@ -18,7 +18,8 @@ from mcp_types import ToolAnnotations
 
 from ..app import mcp
 from ..com import AcadError
-from ..session import session
+from ..session import recorded_owned_keys, session
+from ..winui import describe_blockers
 
 WM_COPYDATA = 0x004A
 SMTO_ABORTIFHUNG = 0x0002
@@ -32,10 +33,10 @@ class _CopyData(ctypes.Structure):
     _fields_ = [("dwData", ctypes.c_size_t), ("cbData", wintypes.DWORD), ("lpData", ctypes.c_void_p)]
 
 
-def owned_names() -> set[str]:
-    """File names (lower case) of the drawings this server created, from the edit guard's keys."""
-    return {key[len("unsaved:"):] if key.startswith("unsaved:") else os.path.basename(key)
-            for key in list(session.owned)}
+def owned_names(keys: set[str] | None = None) -> set[str]:
+    """File names (lower case) of drawings from edit-guard keys (default: the ones this server owns)."""
+    keys = set(session.owned) if keys is None else keys
+    return {key[len("unsaved:"):] if key.startswith("unsaved:") else os.path.basename(key) for key in keys}
 
 
 def owned_in_title(title: str, names: set[str]) -> str | None:
@@ -67,12 +68,18 @@ def cancel() -> str:
     title = win32gui.GetWindowText(hwnd)
     name = owned_in_title(title, owned_names())
     if name is None:
+        # Not in memory: drawings created by the server's own scripts (or before a restart that has not
+        # reconnected yet) are only in the ownership record. Read it again, without COM.
+        name = owned_in_title(title, owned_names(recorded_owned_keys(hwnd)))
+    if name is None:
         raise AcadError(f"Refused: AutoCAD's active drawing (window title {title!r}) was not created by this "
                         "server. A cancel there could stop the user's own command; ask the user to press Esc "
-                        "if they need to.")
+                        "if they need to." + describe_blockers(hwnd))
     if not send_input(hwnd, CANCEL_INPUT):
         raise AcadError("AutoCAD did not accept the cancel within 5 s (it may be hung). Ask the user to check it.")
-    return f"Cancelled the command in '{name}'. Call acad_status to check that AutoCAD answers again."
+    note = describe_blockers(hwnd)
+    return (f"Cancelled the command in '{name}'. Call acad_status to check that AutoCAD answers again."
+            + (f" Note:{note}" if note else ""))
 
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False),
@@ -81,9 +88,10 @@ async def cancel_command() -> str:
     """Cancel a command or prompt this server left open in AutoCAD (for example a scripted
     command stopped at "Select objects:"), which makes AutoCAD reject every other call.
     Works even then: it hands AutoCAD two Ctrl+C through a window message, not COM.
-    Refuses unless AutoCAD's active drawing is one this server created, so it cannot
-    cancel the user's work in their own drawings. Do not use it while the user is
-    working in that drawing.
+    Refuses unless AutoCAD's active drawing is one this server created (also one its
+    scripts created: the ownership record is read again), so it cannot cancel the
+    user's work in their own drawings. It cannot close a dialog; when one is open it
+    names it. Do not use it while the user is working in that drawing.
     """
     try:
         return cancel()

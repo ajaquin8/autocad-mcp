@@ -57,5 +57,11 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership acro
   The identity reader was checked on a real Windows window.
 - **verified 2026-11-04 (live, AMCP-LIVE-20261104-05):** taken back in a new process; the user's drawing stays locked; a reopened file stays locked; the record is emptied on close. `open_drawing` now settles too, because the lookup right after Open failed live.
 
+## 2026-11-06: cancel_command reads the ownership record again
+- **Why:** on 2026-11-06 `cancel_command` refused in a drawing the server's own script had created. The drawing was in `owned.json`, but the server reads that file only when it connects ([[Sources/2026-11-06 Stretch grips by script]]).
+- **Rule:** when the active drawing is not in the server's memory, `cancel_command` reads the record again, without COM. The record must name the same AutoCAD process (id and start time, read from AutoCAD's main window), and the drawing's document window must still exist in that process. Only the cancel uses this; it does not make the drawing editable.
+- **Busy errors** now also name a dialog AutoCAD shows (title and buttons), read from Windows, not COM. Only the user can answer a dialog; `cancel_command` cannot.
+- **verified 2026-11-06 (offline):** the cancel finds a drawing that only the record lists, and refuses when its document window is gone or the record belongs to another AutoCAD process. **Not live-verified.**
+
 ## Supersedes / superseded by
 None.
