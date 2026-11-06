@@ -35,7 +35,7 @@ from ..app import acad_tool
 from ..com import AcadError, worker, xyz
 from ..session import doc_key, is_busy_error, session
 from ..winui import describe_blockers, send_input, window_title
-from .control import CANCEL_INPUT, owned_in_title
+from .control import CANCEL_INPUT
 
 RUN_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "run"
 START_WAIT = 3.0  # seconds for the expression to start (it first creates the transcript file)
@@ -64,6 +64,12 @@ NO_UNDO = {"BEDIT", "BCLOSE", "BSAVE", "BSAVEAS"}
 
 LAG_NOTE = ("LASTPROMPT lags one answer: the prompt logged after an answer is usually the one that "
             "answer replied to, or the one before; the prompt still open at the end is in 'left_waiting_at'.")
+
+
+def title_shows(title: str, drawing: str) -> bool:
+    """AutoCAD's window title names this drawing (anywhere: the Block Editor may add to the title;
+    which drawing is active is checked over COM first, this is a second opinion before sending)."""
+    return drawing.lower() in title.lower()
 
 
 def bare_name(command: str) -> str:
@@ -310,7 +316,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
         raise AcadError("AutoCAD's main window is unknown; call acad_status first.")
     name = str(doc.Name).lower()
     title = window_title(hwnd)
-    if owned_in_title(title, {name}) is None:
+    if not title_shows(title, name):
         raise AcadError(f"AutoCAD's window title ({title!r}) does not show '{doc.Name}' as active; not sending.")
 
     RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -344,7 +350,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
             if not is_busy_error(err):
                 raise
             still = 1
-    if still and owned_in_title(window_title(hwnd), {name}) is not None:
+    if still and title_shows(window_title(hwnd), name):
         send_input(hwnd, CANCEL_INPUT)
         result["cancelled_afterwards"] = True
     result["problem"] = problem(result)
