@@ -63,5 +63,12 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership acro
 - **Busy errors** now also name a dialog AutoCAD shows (title and buttons), read from Windows, not COM. Only the user can answer a dialog; `cancel_command` cannot.
 - **verified 2026-11-06 (offline):** the cancel finds a drawing that only the record lists, and refuses when its document window is gone or the record belongs to another AutoCAD process. **Not live-verified.**
 
+## 2026-11-06: run_command, a guarded way to run prompt-driven commands
+- **Why:** dynamic-block authoring needs Block Editor commands (BPARAMETER, BACTION, BCLOSE) that only exist as prompts. With `send_command` they stalled: names with spaces broke, and a command that ran out of answers left AutoCAD waiting and rejecting every COM call ([[Sources/2026-11-06 Stretch grips by script]]).
+- **Rule:** `run_command` (registered by default, unlike `send_command`) keeps the same guards as the drawing tools: the drawing must be editable (server-created or unlocked on request), AutoCAD must be idle, and the drawing must be the active one (checked over COM and in the window title). It refuses system variable names and commands that run code, change AutoCAD's setup, write or close files, or switch drawings. Answers that would run AutoLISP or a transparent command are refused.
+- **Rollback:** the inline expression sets an UNDO mark first and goes back to it when the command ended early, found no object, or had to be cancelled. Not around BEDIT/BCLOSE/BSAVE (they switch the Block Editor). If UNDO is off or limited to one step, the tool refuses unless the caller passes `undo_on_failure=False`.
+- **Never left waiting:** the expression cancels the command with `(command)` if it still wants input, and the server checks CMDACTIVE afterwards and cancels with `^C^C` if anything is still open. A command stuck in a dialog is not cancelled; the error names the dialog.
+- **verified 2026-11-06 (offline only):** the built expression, the refusals and the transcript handling with a fake command line. **Not live-verified:** whether AutoCAD evaluates the expression without a trailing Enter, the UNDO Mark/Back behaviour, and LASTPROMPT in this setting.
+
 ## Supersedes / superseded by
 None.
