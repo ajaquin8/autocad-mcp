@@ -22,6 +22,7 @@ from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import (
     annotate,
     blocks,
+    commands,
     control,
     documents,
     draw,
@@ -933,3 +934,184 @@ def test_measure_block_reports_what_is_visible_and_leaves_nothing_behind(fake_ap
     session.owned.clear()
     with pytest.raises(AcadError, match="locked"):
         blocks.measure_block(ref.Handle)
+
+
+
+# ---------- run_command: one command with its answers, never left waiting ----------
+
+
+def _lisp_tokens(text):
+    """Parentheses depth over an AutoLISP text, skipping strings (to check what build_lisp makes)."""
+    depth, i, strings = 0, 0, []
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            j, buf = i + 1, []
+            while text[j] != '"':
+                if text[j] == "\\":
+                    j += 1
+                buf.append(text[j])
+                j += 1
+            strings.append("".join(buf))
+            i = j
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            assert depth >= 0
+        i += 1
+    return depth, strings
+
+
+def test_command_lisp_is_one_balanced_expression_with_names_as_strings():
+    lisp = commands.build_lisp("_.-BEDIT", ['Door "FIXED" - Unit \\ x', [12, 3.5], 1, ""], r"C:\Temp\run.txt", False)
+    depth, strings = _lisp_tokens(lisp)
+    assert depth == 0 and lisp.startswith("(progn") and lisp.endswith("(princ))")  # no trailing Enter
+    assert 'Door "FIXED" - Unit \\ x' in strings and "C:/Temp/run.txt" in strings and "_.-BEDIT" in strings
+    assert "(amcp:in 2 (trans (list 12.0 3.5 0.0) 0 1))" in lisp  # WCS point converted to the UCS
+    assert '(amcp:in 4 "")' in lisp and '"_Mark"' not in lisp  # no UNDO mark around BEDIT
+    marked = commands.build_lisp("_.BPARAMETER", ["_L"], "t.txt", True)
+    assert '(command "_.UNDO" "_Mark")' in marked and '(command "_.UNDO" "_Back")' in marked
+    assert '(setvar "OSMODE" 0)' in marked and "(amcp:restore)" in marked
+
+
+def test_command_answers_cover_objects_and_selections():
+    assert commands.lisp_input({"handle": "2a"}) == '(handent "2A")'
+    assert commands.lisp_input({"handle": "2A", "point": [1, 2]}) == \
+        '(list (handent "2A") (trans (list 1.0 2.0 0.0) 0 1))'
+    assert commands.lisp_input({"last": True}) == "(entlast)"
+    assert commands.lisp_input({"select_all": "lwpolyline,dimension"}) == \
+        '(ssget "_X" (list (cons 0 "LWPOLYLINE,DIMENSION")))'
+    assert commands.lisp_input(0.1) == "0.1" and commands.lisp_input(1e-7) == "0.0000001"
+    for bad in ['(command "ERASE")', "!x", "'ZOOM", "a\nb", True, [1], {"handle": "zz"}, {"select_all": "A) (x"},
+                {"what": 1}]:
+        with pytest.raises(ValueError):
+            commands.lisp_input(bad)
+
+
+def test_command_names_are_checked():
+    assert commands.check_command("BPARAMETER") == "_.BPARAMETER"
+    assert commands.check_command("-purge") == "_.-purge"
+    assert commands.check_command("_.-BEDIT") == "_.-BEDIT"
+    for bad in ["LINE 0,0", "(foo)", "", "SHELL", "-VBARUN", "saveas", "_.QUIT", "netload", "SETVAR"]:
+        with pytest.raises(AcadError):
+            commands.check_command(bad)
+
+
+class _FakeAutoCAD:
+    """Stands in for AutoCAD's command line: writes the transcript the expression would write."""
+
+    def __init__(self, lines, needs_enter=False, still_active=False, doc=None):
+        self.lines, self.needs_enter, self.still_active, self.doc = lines, needs_enter, still_active, doc
+        self.sent, self.path = [], None
+
+    def send(self, hwnd, text):
+        self.sent.append(text)
+        if text.startswith("(progn"):
+            import re
+            self.path = re.search(r'\(open "([^"]+)"', text)[1]
+            if self.needs_enter:
+                return True
+        elif text != "\n":
+            return True  # the cancel
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("\n".join(self.lines) + "\n")
+        if self.still_active:
+            self.doc.variables["CMDACTIVE"] = 1
+        return True
+
+
+@pytest.fixture()
+def command_line(fake_app, monkeypatch, tmp_path):
+    session.mark_owned(fake_app.doc)
+    monkeypatch.setattr(session, "hwnd", 1234)
+    monkeypatch.setattr(commands, "RUN_DIR", tmp_path / "run")
+    monkeypatch.setattr(commands, "START_WAIT", 0.2)
+    monkeypatch.setattr(commands, "POLL", 0.01)
+    monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
+    monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: False)
+
+    def install(fake):
+        monkeypatch.setattr(commands, "send_input", fake.send)
+        return fake
+    return install
+
+
+def test_run_command_returns_the_transcript(fake_app, command_line):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tEnter a parameter type", "P\tSpecify base point",
+                                      "P\tSpecify endpoint", "D\t0"]))
+    result = asyncio.run(mcp.call_tool("run_command", {"command": "BPARAMETER", "inputs": ["_L", [0, 0]]}))
+    out = json.loads(result.content[0].text)
+    assert out["completed"] and out["problem"] is None and out["inputs_used"] == 2
+    assert [s["sent"] for s in out["steps"]] == ["_.BPARAMETER", "_L", "[0, 0]"]
+    assert out["undo_mark"] and not out["needed_enter"] and len(fake.sent) == 1
+    assert not list(commands.RUN_DIR.iterdir())  # the transcript file is removed
+
+
+def test_run_command_reports_an_early_end_and_a_cancel(fake_app, command_line):
+    command_line(_FakeAutoCAD(["B\t", "C\tx", "P\ty", "E\t2", "U\t", "D\t0"]))
+    out = commands.run(fake_app.doc, "BPARAMETER", ["_L", "Width"])
+    assert not out["completed"] and out["ended_early_before_input"] == 2 and out["undone"]
+    assert "ended before answer 2 of 2" in out["problem"]
+    command_line(_FakeAutoCAD(["B\t", "C\tx", "P\ty", "A\tEnter number of grips [0/1/2] <2>:", "U\t", "D\t0"]))
+    out = commands.run(fake_app.doc, "BPARAMETER", ["_L"])
+    assert out["cancelled"] and "number of grips" in out["problem"]
+    command_line(_FakeAutoCAD(["B\t", "C\tx", "N\t1", "A\tSelect objects:", "U\t", "D\t0"]))
+    out = commands.run(fake_app.doc, "ERASE", [{"handle": "FFFF"}])
+    assert not out["completed"] and "found nothing" in out["problem"]
+
+
+def test_run_command_presses_enter_once_if_the_expression_did_not_start(fake_app, command_line):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t0"], needs_enter=True))
+    out = commands.run(fake_app.doc, "REGEN")
+    assert out["completed"] and out["needed_enter"] and fake.sent[1] == "\n"
+
+
+def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t1"], still_active=True, doc=fake_app.doc))
+    out = commands.run(fake_app.doc, "LINE")
+    assert out["cancelled_afterwards"] and fake.sent[-1] == "\x03\x03"
+
+
+def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypatch):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx"]))  # never finishes: e.g. stuck in a dialog
+    monkeypatch.setattr(commands, "describe_blockers", lambda hwnd: ' AutoCAD shows the dialog "Block".')
+    with pytest.raises(AcadError, match='did not finish.*do NOT repeat.*"Block"'):
+        commands.run(fake_app.doc, "BCLOSE", timeout_seconds=1)
+    assert len(fake.sent) == 1
+
+
+def test_run_command_keeps_the_guards(fake_app, command_line, monkeypatch):
+    fake = command_line(_FakeAutoCAD(["D\t0"]))
+    user = FakeDoc("Plan.dwg", r"C:\Jobs\Plan.dwg")
+    with pytest.raises(AcadError, match="locked"):
+        commands.run(user, "REGEN")
+    fake_app.doc.variables["CMDACTIVE"] = 1
+    with pytest.raises(AcadError, match="busy"):
+        commands.run(fake_app.doc, "REGEN")
+    fake_app.doc.variables["CMDACTIVE"] = 0
+    other = FakeDoc("Drawing2.dwg")
+    session.mark_owned(other)
+    fake_app.Documents.docs.append(other)
+    with pytest.raises(AcadError, match="not the active drawing"):
+        commands.run(other, "REGEN")
+    monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Plan.dwg]")
+    with pytest.raises(AcadError, match="does not show"):
+        commands.run(fake_app.doc, "REGEN")
+    monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
+    fake_app.doc.variables["UNDOCTL"] = 0
+    with pytest.raises(AcadError, match="UNDO is off"):
+        commands.run(fake_app.doc, "REGEN")
+    monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: True)
+    with pytest.raises(AcadError, match="system variable"):
+        commands.run(fake_app.doc, "SECURELOAD2")
+    assert fake.sent == []
+
+
+def test_system_variables_are_told_apart_from_commands():
+    class Doc:
+        def GetVariable(self, name):  # noqa: N802
+            if name == "OSMODE":
+                return 0
+            raise _com_error(-2147024809)
+    assert commands.is_system_variable(Doc(), "OSMODE") and not commands.is_system_variable(Doc(), "BPARAMETER")

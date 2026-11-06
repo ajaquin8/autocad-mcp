@@ -196,3 +196,10 @@ Writer: Claude Code side session, from the plan in the 2026-11-06 drafting-templ
   - `session.py`: the busy refusal says what CMDACTIVE means (for example "a command and an AutoLISP expression").
 - New: [[Sources/2026-11-06 Stretch grips by script]] (AMCP-LIVE-20261106-01), written from that session's notes. Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Decisions/Edit guard and document safety]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
 - Tests: 5 new offline tests (83 in total). **Not live-verified.**
+
+## 2026-11-06: command reliability, part 2 (run_command)
+Writer: Claude Code side session.
+- New tool `run_command` (`tools/commands.py`): one command plus a list of answers, sent as one inline AutoLISP expression through WM_COPYDATA (no COM call while it runs, no `.lsp` file, so no SECURELOAD prompt). It feeds the answers one by one, logs LASTPROMPT after each, stops if the command ends early, cancels with `(command)` if it still waits, goes back to an UNDO mark on failure, and returns the transcript. Object snaps are off while it runs.
+- `winui.py` now holds `send_input` (moved from `tools/control.py`) and `window_title`.
+- Updated: README Safety and Tools, [[Decisions/Edit guard and document safety]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (43 tools).
+- Tests: 10 new offline tests (93 in total). **Not live-verified.**

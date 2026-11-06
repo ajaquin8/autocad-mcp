@@ -45,7 +45,11 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
   When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
   retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
 - **`cancel_command`** cancels (two Ctrl+C) a prompt the server left open, and refuses unless the
-  active drawing is one the server created.
+  active drawing is one the server created. Busy errors name the AutoCAD dialog that is in the way.
+- **`run_command`** runs one prompt-driven command (Block Editor commands, `-PURGE` ...) with a list of
+  answers, only in the server's own drawings, and never leaves AutoCAD waiting: a command that still
+  wants input is cancelled, and a failed one is undone back to a mark. Commands that run code,
+  change AutoCAD's setup, write or close files, or switch drawings are refused.
 - **One undo step per tool** (UNDO Begin/End marks). If a tool fails, what it created is deleted
   and what it changed is put back.
 - **No silent overwrites or discarded changes.** `close_document` only closes the server's own drawings.
@@ -56,8 +60,8 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-42 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
-dimensions, leaders, blocks and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, sheets (layouts,
+43 tools: drawings, layers, lines/polylines/arcs/circles/text, centre marks, linear and radial
+dimensions, leaders, blocks and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, prompt-driven commands (`run_command`), sheets (layouts,
 viewports at an exact scale, title blocks), queries, view capture, PDF plotting and clearing a stuck prompt. The full list is
 generated from the code into
 [knowledge/Projects/AutoCAD-MCP/Tool reference.md](knowledge/Projects/AutoCAD-MCP/Tool%20reference.md).
