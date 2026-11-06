@@ -964,10 +964,10 @@ def _lisp_tokens(text):
 
 
 def test_command_lisp_is_one_balanced_expression_with_names_as_strings():
-    lisp = commands.build_lisp("_.-BEDIT", ['W40 "FIXED" - Unit \\ x', [12, 3.5], 1, ""], r"C:\Temp\run.txt", False)
+    lisp = commands.build_lisp("_.-BEDIT", ['Door "FIXED" - Unit \\ x', [12, 3.5], 1, ""], r"C:\Temp\run.txt", False)
     depth, strings = _lisp_tokens(lisp)
     assert depth == 0 and lisp.startswith("(progn") and lisp.endswith("(princ))")  # no trailing Enter
-    assert 'W40 "FIXED" - Unit \\ x' in strings and "C:/Temp/run.txt" in strings and "_.-BEDIT" in strings
+    assert 'Door "FIXED" - Unit \\ x' in strings and "C:/Temp/run.txt" in strings and "_.-BEDIT" in strings
     assert "(amcp:in 2 (trans (list 12.0 3.5 0.0) 0 1))" in lisp  # WCS point converted to the UCS
     assert '(amcp:in 4 "")' in lisp and '"_Mark"' not in lisp  # no UNDO mark around BEDIT
     marked = commands.build_lisp("_.BPARAMETER", ["_L"], "t.txt", True)
