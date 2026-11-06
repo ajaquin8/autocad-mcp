@@ -21,6 +21,7 @@ from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import (
     annotate,
+    block_editor,
     blocks,
     commands,
     control,
@@ -1115,3 +1116,154 @@ def test_system_variables_are_told_apart_from_commands():
                 return 0
             raise _com_error(-2147024809)
     assert commands.is_system_variable(Doc(), "OSMODE") and not commands.is_system_variable(Doc(), "BPARAMETER")
+
+
+# ---------- Block Editor tools ----------
+
+
+class _Runs:
+    """Records what the Block Editor tools ask run_command to do, and answers like it would."""
+
+    def __init__(self, doc, results=None, editor_after=None):
+        self.doc, self.calls, self.results, self.editor_after = doc, [], list(results or []), editor_after or {}
+
+    def run(self, doc, command, inputs=(), undo_on_failure=True, timeout_seconds=30.0):
+        self.calls.append((command, list(inputs), undo_on_failure))
+        if command in self.editor_after:
+            doc.variables["BLOCKEDITOR"] = self.editor_after[command]
+        result = self.results.pop(0) if self.results else {}
+        base = {"completed": True, "steps": [{"sent": command, "lastprompt": "x"}], "inputs_used": len(inputs),
+                "cancelled": False, "undone": False, "problem": None}
+        return {**base, **result}
+
+
+class _Blocks:
+    def __init__(self, blocks):
+        self.blocks = blocks
+
+    def Item(self, name):  # noqa: N802
+        if name not in self.blocks:
+            raise _com_error(-2145386476)
+        return self.blocks[name]
+
+
+class _Definition:
+    def __init__(self, items):
+        self.items = items
+
+    @property
+    def Count(self):  # noqa: N802
+        return len(self.items)
+
+    def Item(self, i):  # noqa: N802
+        return self.items[i]
+
+
+def _editor(fake_app, monkeypatch, open_=False, **runs):
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    doc.variables["BLOCKEDITOR"] = 1 if open_ else 0
+    doc.Blocks = _Blocks({"Door unit - 40": _Definition([])})
+    recorder = _Runs(doc, **runs)
+    monkeypatch.setattr(block_editor.commands, "run", recorder.run)
+    return doc, recorder
+
+
+def test_open_block_editor_passes_the_name_with_spaces_whole(fake_app, monkeypatch):
+    doc, runs = _editor(fake_app, monkeypatch, editor_after={"-BEDIT": 1})
+    out = block_editor.open_block_editor("Door unit - 40")
+    assert out["block_editor_open"] and runs.calls == [("-BEDIT", ["Door unit - 40"], False)]
+    with pytest.raises(AcadError, match="is open"):
+        block_editor.open_block_editor("Door unit - 40")
+    doc.variables["BLOCKEDITOR"] = 0
+    with pytest.raises(AcadError, match="No block named"):
+        block_editor.open_block_editor("Nope")
+
+
+def test_close_block_editor_saves_and_answers_a_save_prompt(fake_app, monkeypatch):
+    doc, runs = _editor(fake_app, monkeypatch, open_=True,
+                        results=[{}, {"cancelled": True, "completed": False}, {}], editor_after={})
+    original = runs.run
+
+    def run(doc_, command, inputs=(), **kw):
+        out = original(doc_, command, inputs, **kw)
+        if command == "BCLOSE" and inputs:
+            doc_.variables["BLOCKEDITOR"] = 0
+        return out
+    monkeypatch.setattr(block_editor.commands, "run", run)
+    out = block_editor.close_block_editor()
+    assert not out["block_editor_open"]
+    assert [c[:2] for c in runs.calls] == [("BSAVE", []), ("BCLOSE", []), ("BCLOSE", ["_S"])]
+
+
+def test_close_block_editor_reports_when_it_stays_open(fake_app, monkeypatch):
+    _editor(fake_app, monkeypatch, open_=True, results=[{"completed": False, "problem": "nope"}])
+    with pytest.raises(AcadError, match="Closing the Block Editor failed: nope"):
+        block_editor.close_block_editor(save=False)
+
+
+def test_linear_parameter_answers_in_the_live_order(fake_app, monkeypatch):
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    out = block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6])
+    assert runs.calls == [("BPARAMETER", ["_L", "_L", "Width", [0, 0], [48, 0], [24, -6], "1"], True)]
+    assert out["pick_point"] == [12.0, -6.0]  # on the parameter's line, a quarter of the way along
+    assert block_editor.parameter_pick_point([0, 0], [0, 84], [-6, 42]) == [-6.0, 21.0]
+    with pytest.raises(ValueError):
+        block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6], grips=3)
+
+
+def test_linear_parameter_needs_the_editor_and_reports_failure(fake_app, monkeypatch):
+    _editor(fake_app, monkeypatch, open_=False)
+    with pytest.raises(AcadError, match="not open"):
+        block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6])
+    fake_app.doc.variables["BLOCKEDITOR"] = 1
+    _editor(fake_app, monkeypatch, open_=True,
+            results=[{"completed": False, "problem": "It was waiting at 'grips'.", "undone": True}])
+    with pytest.raises(AcadError, match="waiting at 'grips'.*put back"):
+        block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6])
+
+
+def test_stretch_action_inputs_follow_the_live_prompts(fake_app, monkeypatch):
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    zoomed = []
+    fake_app.ZoomExtents = lambda: zoomed.append(True)
+    doc.variables["BACTIONBARMODE"] = 1
+    block_editor.add_stretch_action([12, -6], [[40, -10], [60, 90]])
+    (command, inputs, undo), = runs.calls
+    assert command == "BACTION" and undo and zoomed
+    assert inputs == [[12, -6], "_T", "_S", [40, -10], [60, 90], "_C", [40, -10], [60, 90], "", [12, -6]]
+    assert doc.variables["BACTIONBARMODE"] == 1  # put back
+    centre = block_editor.stretch_inputs([12, -6], [[20, -10], [28, 90]], None, "second", 0.5, None, [30, 0])
+    assert centre[-6:] == ["_R", {"select_all": "LWPOLYLINE,DIMENSION"}, "", "_M", 0.5, [30, 0]]
+    own = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], {"handles": ["2A"]}, "start", None, "", None)
+    assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handle": "2A"}, "", [0, 0]]
+    with pytest.raises(ValueError):
+        block_editor.stretch_inputs([0, 0], [[0, 0]], None, "second", None, None, None)
+
+
+def test_lock_attribute_positions_one_undo_step(fake_app, monkeypatch):
+    doc, _ = _editor(fake_app, monkeypatch)
+    a, b = FakeEntity(doc, "AcDbAttributeDefinition", TagString="MARK", LockPosition=False), \
+        FakeEntity(doc, "AcDbAttributeDefinition", TagString="SIZE", LockPosition=True)
+    doc.Blocks = _Blocks({"Door unit - 40": _Definition([a, FakeEntity(doc, "AcDbLine"), b])})
+    out = block_editor.lock_attribute_positions("Door unit - 40")
+    assert out == {"block": "Door unit - 40", "locked": ["MARK"], "already_locked": ["SIZE"]} and a.LockPosition
+    assert doc.undo_log[-2:] == ["start", "end"]
+    doc.variables["BLOCKEDITOR"] = 1
+    with pytest.raises(AcadError, match="is open"):
+        block_editor.lock_attribute_positions("Door unit - 40")
+
+
+def test_check_dynamic_block_measures_each_case_and_cleans_up(fake_app, monkeypatch):
+    doc, _ = _editor(fake_app, monkeypatch)
+    doc.Blocks = _Blocks({"WAG-FAST-TEK-SIDE": _Definition([])})
+    out = block_editor.check_dynamic_block("WAG-FAST-TEK-SIDE", [
+        {"properties": {"Length": 2.0}, "expect": {"height": 1.0, "min_y": -1.0, "max_y": 0}},
+        {"properties": {"Size": "#8-18"}, "expect": {"width": 0.5}},  # wrong on purpose
+    ])
+    first, second = out["cases"]
+    assert first["passed"] and not second["passed"] and not out["passed"]
+    assert second["misses"]["width"]["measured"] == round(0.348 - 0.432, 6)
+    assert doc.space.items == []  # the temporary reference is gone
+    with pytest.raises(ValueError):
+        block_editor.check_dynamic_block("WAG-FAST-TEK-SIDE", [{"properties": {}, "expect": {"depth": 1}}])
