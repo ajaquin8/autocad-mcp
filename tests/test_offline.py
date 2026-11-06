@@ -632,6 +632,114 @@ def test_cancel_sends_two_ctrl_c_when_a_server_drawing_is_active(fake_app, monke
         control.cancel()
 
 
+def _scripts_record(windows_alive=(555,), identity="100@2026-11-06T08:00:00"):
+    """An ownership record as a helper script writes it: Drawing7 is not in the server's memory."""
+    session_module.OWNED_RECORD.write_text(json.dumps(
+        {"autocad": identity, "drawings": [{"key": "unsaved:drawing7.dwg", "window": 555}]}), encoding="utf-8")
+    return lambda hwnd: 42 if hwnd == 1234 or hwnd in windows_alive else None
+
+
+def test_cancel_reads_the_record_again_for_drawings_the_servers_scripts_created(fake_app, monkeypatch):
+    # Live 2026-11-06: cancel_command refused in a drawing a script made, as the record was read only at connect.
+    window = _Window("Autodesk AutoCAD 2026 - [Drawing7.dwg]")
+    monkeypatch.setattr(control, "win32gui", window)
+    monkeypatch.setattr(control, "send_input", window.send)
+    monkeypatch.setattr(control, "describe_blockers", lambda hwnd: "")
+    monkeypatch.setattr(session, "hwnd", 1234)
+    monkeypatch.setattr(session_module.winui, "process_identity", lambda hwnd: "100@2026-11-06T08:00:00")
+    monkeypatch.setattr(session_module.winui, "window_pid", _scripts_record())
+    assert "Cancelled the command in 'drawing7.dwg'" in control.cancel()
+    assert not session.owned  # cancelling does not make the drawing editable
+    monkeypatch.setattr(session_module.winui, "window_pid", _scripts_record(windows_alive=()))
+    with pytest.raises(AcadError, match="Refused"):  # its document window is gone: closed or reopened
+        control.cancel()
+    monkeypatch.setattr(session_module.winui, "window_pid", _scripts_record())
+    monkeypatch.setattr(session_module.winui, "process_identity", lambda hwnd: "200@2026-11-06T09:00:00")
+    with pytest.raises(AcadError, match="Refused"):  # another AutoCAD process wrote that record
+        control.cancel()
+    assert len(window.posted) == 1
+
+
+class _Desktop:
+    """Top-level windows for winui.blocking_dialogs: hwnd -> (pid, class, title, enabled, buttons)."""
+
+    def __init__(self, windows: dict) -> None:
+        self.windows = windows
+
+    def pid(self, hwnd):
+        return self.windows[hwnd][0] if hwnd in self.windows else None
+
+    def EnumWindows(self, visit, extra):  # noqa: N802 - mirrors win32gui
+        for hwnd in self.windows:
+            visit(hwnd, extra)
+
+    def EnumChildWindows(self, hwnd, visit, extra):  # noqa: N802
+        for i, _ in enumerate(self.windows[hwnd][4]):
+            visit((hwnd, i), extra)
+
+    def IsWindowVisible(self, hwnd):  # noqa: N802
+        return True
+
+    def IsWindowEnabled(self, hwnd):  # noqa: N802
+        return self.windows[hwnd][3]
+
+    def GetClassName(self, hwnd):  # noqa: N802
+        return "Button" if isinstance(hwnd, tuple) else self.windows[hwnd][1]
+
+    def GetWindowText(self, hwnd):  # noqa: N802
+        if isinstance(hwnd, tuple):
+            return self.windows[hwnd[0]][4][hwnd[1]]
+        return self.windows[hwnd][2]
+
+
+def test_busy_errors_name_the_dialog_autocad_shows(monkeypatch):
+    from autocad_mcp import winui
+    desk = _Desktop({1: (42, "AfxFrame", "AutoCAD 2026", True, []),
+                     2: (42, "Afx:Palette", "PROPERTIES", True, []),  # a floating palette: not a blocker
+                     3: (42, "#32770", "Block - Changes Not Saved", True, ["&Save", "Discard", "Cancel"]),
+                     4: (77, "#32770", "Another program", True, ["OK"])})
+    monkeypatch.setattr(winui, "win32gui", desk)
+    monkeypatch.setattr(winui, "window_pid", desk.pid)
+    note = winui.describe_blockers(1)
+    assert '"Block - Changes Not Saved" (buttons: Save, Discard, Cancel)' in note
+    assert "PROPERTIES" not in note and "Another program" not in note
+    desk.windows[1] = (42, "AfxFrame", "AutoCAD 2026", False, [])  # main window disabled: a modal dialog is up
+    desk.windows[3] = (42, "HwndWrapper", "Insert", True, [])  # a WPF dialog, not #32770
+    del desk.windows[2]
+    assert '"Insert"' in winui.describe_blockers(1)
+    desk.windows[3] = (42, "#32770", "Gone", False, [])  # disabled windows are not the one to answer
+    assert winui.describe_blockers(1) == "" and winui.describe_blockers(None) == ""
+
+
+def test_a_busy_tool_call_names_the_dialog(fake_app, monkeypatch):
+    from autocad_mcp import app as app_module
+
+    def busy(name):
+        raise _com_error(-2147418111)
+    monkeypatch.setattr(fake_app.doc, "GetVariable", busy)
+    monkeypatch.setattr(app_module, "describe_blockers", lambda hwnd: ' AutoCAD shows the dialog "Plot".')
+    with pytest.raises(ToolError, match='busy.*dialog "Plot"'):
+        asyncio.run(mcp.call_tool("acad_status", {}))
+
+
+def test_busy_message_says_what_is_active(fake_app):
+    fake_app.doc.variables["CMDACTIVE"] = 33
+    with pytest.raises(AcadError, match="a command and an AutoLISP expression"):
+        session.require_idle(fake_app.doc)
+
+
+def test_status_polls_retry_only_briefly():
+    w = ComWorker()
+
+    def inside():
+        limit = w.message_filter.limit_ms
+        with w.quick_retries():
+            short = w.message_filter.limit_ms
+        return limit, short, w.message_filter.limit_ms
+    limit, short, after = w.call(inside)
+    assert short == int(com.QUICK_RETRY_SECONDS * 1000) < limit == after
+
+
 # ---------- ownership across a server restart ----------
 
 

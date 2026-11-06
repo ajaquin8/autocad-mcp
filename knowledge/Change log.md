@@ -186,3 +186,13 @@ Writer: Claude Code (Alex: "Yes, fix it").
 - `insert_block`: for a dynamic block, `bbox` is now measured from a temporary exploded copy (attribute text left out), because AutoCAD's box also counts hidden sizes ([[Sources/2026-11-04 Block tools through the server]]). `measure_block` shares the same helpers; it now forgets only its own exploded parts instead of clearing the whole rollback list.
 - Updated: [[Research/AutoCAD API gotchas]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
 - Tests: 1 new offline test (78 in total). **Not live-verified.**
+
+## 2026-11-06: command reliability, part 1 (cancel, dialogs, quick polls)
+Writer: Claude Code side session, from the plan in the 2026-11-06 drafting-templates session's notes.
+- Code:
+  - `tools/control.py`: `cancel_command` reads `owned.json` again (without COM) before refusing, so it can cancel in drawings the server's own scripts created.
+  - New `winui.py`: COM-free window helpers. Busy errors (and timeouts, and the busy guard's refusal) name the dialog AutoCAD shows, with its buttons.
+  - `com.py`: `worker.quick_retries()`; `acad_status` retries rejected calls for 1 s instead of 8 s, so a stuck command shows up fast.
+  - `session.py`: the busy refusal says what CMDACTIVE means (for example "a command and an AutoLISP expression").
+- New: [[Sources/2026-11-06 Stretch grips by script]] (AMCP-LIVE-20261106-01), written from that session's notes. Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Decisions/Edit guard and document safety]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
+- Tests: 5 new offline tests (83 in total). **Not live-verified.**

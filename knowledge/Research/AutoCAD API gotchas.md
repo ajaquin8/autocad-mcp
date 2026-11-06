@@ -113,3 +113,17 @@ Source: [[Sources/2026-11-03 Dynamic block authoring]] (AMCP-LIVE-20261103-06 to
 - **verified:** `GetBoundingBox` on a dynamic block reference reported the extents of a larger, hidden size (x ±0.26, top 0.19 at a size that shows ±0.207, top 0.12). The stretched end did follow the current length.
 - **inferred:** the box includes objects hidden by the visibility state. To get what is shown, explode a copy and measure it (`measure_block`).
 - **2026-11-04, later:** `insert_block` now reports a dynamic block's `bbox` from an exploded copy (what it shows), not from `GetBoundingBox`. `query_entities` and `get_entity` still report AutoCAD's box.
+
+## 2026-11-06: prompt-driven commands from a script ([[Sources/2026-11-06 Stretch grips by script]])
+All **reported** from the notes of the session that ran the batch (seen there in its log, on screen or in the command history); not re-checked by this writer.
+- **reported:** `SendCommand` text treats a space as Enter, and quotes do not keep a name with spaces together. Pass names through LISP strings: `(command "_.-BEDIT" "<name with spaces>")`.
+- **reported:** a `(command ...)` call that runs out of inputs leaves the command waiting, and every COM call is then refused, including `GetVariable` polls. Check `CMDACTIVE` inside the same LISP expression and cancel with `(command)` (no arguments acts as Esc), so AutoCAD is never left waiting.
+- **reported:** `LASTPROMPT` lags one input. A prompt is printed only when the next input arrives, so a driver cannot read the prompt it is about to answer. With `CMDECHO 0` it holds the echo of the typed expression.
+- **reported:** `BPARAMETER` Linear asks for the number of grips after the label location; answer `1`.
+- **reported:** BACTION (BACTIONBARMODE 0) asks: parameter, action type (`[Array/Move/Scale/sTretch]`, Stretch is **T**), parameter point (`<Second>`), stretch frame corners, objects (crossing), Enter, then action location or `[Multiplier/Offset]`.
+- **reported:** "Select parameter:" does not take the parameter's ename ("Expects a single object"); a pick on screen works. Untried: an entsel-style `(list ename point)`.
+- **reported:** `BCLOSE` right after `BSAVE` can still ask `[Save/Discard changes]`, and once showed a modal task dialog "Block - Changes Not Saved" that blocks COM completely.
+- **reported:** loading a `.lsp` file from a folder outside the trusted paths raises the SECURELOAD prompt. An inline expression sent as command-line input does not load a file.
+- **reported:** a plain window selection misses wide text (attribute definitions, MTEXT) that sticks out of a narrow band. For a centre action, select with a crossing window, then remove polylines and dimensions (`(ssget "_X" '((0 . "LWPOLYLINE,DIMENSION")))`), or they move by half.
+- **reported:** right after the last reference to a dynamic block is deleted, `-PURGE` still finds no unreferenced blocks: its anonymous `*U` copy counts until save and reopen.
+- **inferred (offline, 2026-11-06):** while a modal dialog is open, AutoCAD's main window is disabled and the dialog is a visible, enabled top-level window of the same process (class `#32770` for message boxes and task dialogs). Busy errors now list such windows. Task dialogs draw their own buttons, so their buttons may not be listed. **unresolved:** not yet seen live.
