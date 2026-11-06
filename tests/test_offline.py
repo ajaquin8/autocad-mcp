@@ -1163,7 +1163,7 @@ def _editor(fake_app, monkeypatch, open_=False, **runs):
     doc = fake_app.doc
     session.mark_owned(doc)
     doc.variables["BLOCKEDITOR"] = 1 if open_ else 0
-    doc.Blocks = _Blocks({"Unit - W40": _Definition([])})
+    doc.Blocks = _Blocks({"Door unit - 40": _Definition([])})
     recorder = _Runs(doc, **runs)
     monkeypatch.setattr(block_editor.commands, "run", recorder.run)
     return doc, recorder
@@ -1171,10 +1171,10 @@ def _editor(fake_app, monkeypatch, open_=False, **runs):
 
 def test_open_block_editor_passes_the_name_with_spaces_whole(fake_app, monkeypatch):
     doc, runs = _editor(fake_app, monkeypatch, editor_after={"-BEDIT": 1})
-    out = block_editor.open_block_editor("Unit - W40")
-    assert out["block_editor_open"] and runs.calls == [("-BEDIT", ["Unit - W40"], False)]
+    out = block_editor.open_block_editor("Door unit - 40")
+    assert out["block_editor_open"] and runs.calls == [("-BEDIT", ["Door unit - 40"], False)]
     with pytest.raises(AcadError, match="is open"):
-        block_editor.open_block_editor("Unit - W40")
+        block_editor.open_block_editor("Door unit - 40")
     doc.variables["BLOCKEDITOR"] = 0
     with pytest.raises(AcadError, match="No block named"):
         block_editor.open_block_editor("Nope")
@@ -1245,13 +1245,13 @@ def test_lock_attribute_positions_one_undo_step(fake_app, monkeypatch):
     doc, _ = _editor(fake_app, monkeypatch)
     a, b = FakeEntity(doc, "AcDbAttributeDefinition", TagString="MARK", LockPosition=False), \
         FakeEntity(doc, "AcDbAttributeDefinition", TagString="SIZE", LockPosition=True)
-    doc.Blocks = _Blocks({"Unit - W40": _Definition([a, FakeEntity(doc, "AcDbLine"), b])})
-    out = block_editor.lock_attribute_positions("Unit - W40")
-    assert out == {"block": "Unit - W40", "locked": ["MARK"], "already_locked": ["SIZE"]} and a.LockPosition
+    doc.Blocks = _Blocks({"Door unit - 40": _Definition([a, FakeEntity(doc, "AcDbLine"), b])})
+    out = block_editor.lock_attribute_positions("Door unit - 40")
+    assert out == {"block": "Door unit - 40", "locked": ["MARK"], "already_locked": ["SIZE"]} and a.LockPosition
     assert doc.undo_log[-2:] == ["start", "end"]
     doc.variables["BLOCKEDITOR"] = 1
     with pytest.raises(AcadError, match="is open"):
-        block_editor.lock_attribute_positions("Unit - W40")
+        block_editor.lock_attribute_positions("Door unit - 40")
 
 
 def test_check_dynamic_block_measures_each_case_and_cleans_up(fake_app, monkeypatch):
