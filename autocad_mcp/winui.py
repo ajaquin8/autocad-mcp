@@ -7,6 +7,8 @@ plain Win32 window functions only. They make no COM call and may run on any thre
 from __future__ import annotations
 
 import contextlib
+import ctypes
+from ctypes import wintypes
 from typing import Any
 
 import win32api
@@ -16,6 +18,31 @@ import win32process
 DIALOG_CLASS = "#32770"  # standard Windows dialogs, message boxes and task dialogs
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 MAX_BUTTONS = 8
+WM_COPYDATA = 0x004A
+SMTO_ABORTIFHUNG = 0x0002
+
+
+class _CopyData(ctypes.Structure):
+    _fields_ = [("dwData", ctypes.c_size_t), ("cbData", wintypes.DWORD), ("lpData", ctypes.c_void_p)]
+
+
+def send_input(hwnd: int, text: str) -> bool:
+    """Hand text to AutoCAD's command line through WM_COPYDATA (dwData 1, the channel external programs
+    use to send commands); False if AutoCAD did not take it within 5 s."""
+    buf = ctypes.create_unicode_buffer(text)
+    data = _CopyData(1, ctypes.sizeof(buf), ctypes.cast(buf, ctypes.c_void_p))
+    result = ctypes.c_size_t()
+    sent = ctypes.windll.user32.SendMessageTimeoutW(wintypes.HWND(hwnd), WM_COPYDATA, None, ctypes.byref(data),
+                                                    SMTO_ABORTIFHUNG, 5000, ctypes.byref(result))
+    return bool(sent)
+
+
+def window_title(hwnd: int) -> str:
+    """The window's title ('' if it is gone)."""
+    try:
+        return win32gui.GetWindowText(hwnd)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def window_pid(hwnd: int) -> int | None:

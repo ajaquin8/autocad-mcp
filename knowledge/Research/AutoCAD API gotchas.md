@@ -127,3 +127,9 @@ All **reported** from the notes of the session that ran the batch (seen there in
 - **reported:** a plain window selection misses wide text (attribute definitions, MTEXT) that sticks out of a narrow band. For a centre action, select with a crossing window, then remove polylines and dimensions (`(ssget "_X" '((0 . "LWPOLYLINE,DIMENSION")))`), or they move by half.
 - **reported:** right after the last reference to a dynamic block is deleted, `-PURGE` still finds no unreferenced blocks: its anonymous `*U` copy counts until save and reopen.
 - **inferred (offline, 2026-11-06):** while a modal dialog is open, AutoCAD's main window is disabled and the dialog is a visible, enabled top-level window of the same process (class `#32770` for message boxes and task dialogs). Busy errors now list such windows. Task dialogs draw their own buttons, so their buttons may not be listed. **unresolved:** not yet seen live.
+
+## 2026-11-06: open questions for run_command (to check in the first live run)
+- **unresolved:** whether AutoCAD evaluates an AutoLISP expression handed over by WM_COPYDATA as soon as its parentheses close, or wants Enter. `run_command` sends no Enter, and sends one only if the expression has not started (no transcript file) after 3 s; the result says so in `needed_enter`.
+- **unresolved:** how long a line AutoCAD's command line takes. A Block Editor action with 14 answers is about 1.7 KB of AutoLISP.
+- **unresolved:** whether the window title changes in the Block Editor. `run_command` only checks that the title names the drawing.
+- **unresolved:** whether UNDO Mark / Back inside the Block Editor goes back only to the mark.
