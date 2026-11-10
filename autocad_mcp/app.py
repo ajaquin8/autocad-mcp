@@ -36,13 +36,17 @@ save_document. Each drawing tool is one undo step and is rolled back
 automatically if it fails. Results report entity handles; use them with
 get_entity, move_entities, change_properties and delete_entities.
 
+Templates and sheets: add_text_style, add_dimension_style and add_multileader_style make
+styles (give the dimension and multileader styles the plot scale factor); set_page_setup
+sets a sheet's paper size; insert_block with layout= puts a title block on a sheet.
+
 If AutoCAD keeps rejecting calls because a command or prompt the server started
 is still open in a server-created drawing, cancel_command cancels it there. It
 never acts in the user's drawings; if the user is busy, ask them instead. When a
 busy error names an AutoCAD dialog, only the user can answer it.
 """
 
-mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.3")
+mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.4")
 
 
 def _where(err: BaseException) -> str:

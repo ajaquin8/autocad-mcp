@@ -1267,3 +1267,164 @@ def test_check_dynamic_block_measures_each_case_and_cleans_up(fake_app, monkeypa
     assert doc.space.items == []  # the temporary reference is gone
     with pytest.raises(ValueError):
         block_editor.check_dynamic_block("WAG-FAST-TEK-SIDE", [{"properties": {}, "expect": {"depth": 1}}])
+
+
+# ---------- template tools: styles, page setup, attribute definitions, sheets ----------
+
+
+def test_dimension_look_variables_are_allowed(fake_app):
+    session.mark_owned(fake_app.doc)
+    out = settings.set_drawing_variables({"DIMTAD": 1, "DIMTIH": 0, "dimfrac": 2, "DIMGAP": 0.0625})
+    assert (out["DIMTAD"], out["DIMTIH"], out["DIMFRAC"]) == (1, 0, 2)
+    assert out["dimension_style_updated"] == "Standard"
+    with pytest.raises(AcadError, match="between"):
+        settings.set_drawing_variables({"DIMTAD": 7})
+
+
+def test_text_style_is_created_then_updated(fake_app):
+    with pytest.raises(AcadError, match="locked"):
+        settings.add_text_style("GD-NOTES")
+    session.mark_owned(fake_app.doc)
+    made = settings.add_text_style("GD-NOTES", font="romans.shx", width_factor=0.9, make_current=True)
+    assert made["created"] and made["current"] and (made["font"], made["width_factor"]) == ("romans.shx", 0.9)
+    assert fake_app.doc.ActiveTextStyle.Name == "GD-NOTES"
+    again = settings.add_text_style("gd-notes", font="arial.ttf", oblique_angle=15)
+    assert not again["created"] and again["font"] == "arial.ttf" and again["oblique_angle"] == pytest.approx(15)
+    assert [s.Name for s in fake_app.doc.TextStyles.items].count("GD-NOTES") == 1
+    with pytest.raises(AcadError, match="font file"):
+        settings.add_text_style("X", font="Arial")
+    with pytest.raises(AcadError, match="not a usable text style name"):
+        settings.add_text_style("A/B")
+
+
+def test_failed_text_style_change_is_put_back(fake_app):
+    session.mark_owned(fake_app.doc)
+
+    def refuse(which):
+        raise RuntimeError("AutoCAD refused")
+    fake_app.doc.Regen = refuse
+    with pytest.raises(RuntimeError):
+        settings.add_text_style("NOTES-TEXT", font="simplex.shx", height=0.125, make_current=True)
+    style = fake_app.doc.TextStyles.Item(1)
+    assert (style.FontFile, style.Height) == ("txt.shx", 0.0)
+    assert fake_app.doc.ActiveTextStyle.Name == "Standard"
+
+
+def test_dimension_style_copies_the_current_settings_and_becomes_current(fake_app):
+    session.mark_owned(fake_app.doc)
+    settings.add_text_style("GD-NOTES")
+    out = settings.add_dimension_style("GD-3IN", {"dimscale": 4, "DIMTAD": 1, "DIMFRAC": 2},
+                                       text_style="gd-notes", arrowhead="tick")
+    style = fake_app.doc.ActiveDimStyle
+    assert out["created"] and out["current"] and style.Name == "GD-3IN"
+    copied = style.copied
+    assert (copied["DIMSCALE"], copied["DIMTXSTY"], copied["DIMBLK"]) == (4.0, "GD-NOTES", "_ARCHTICK")
+    assert out["settings"]["DIMTAD"] == 1
+    with pytest.raises(AcadError, match="arrowhead must be"):
+        settings.add_dimension_style("X", arrowhead="star")
+    with pytest.raises(AcadError, match="not a dimension setting"):
+        settings.add_dimension_style("X", {"LTSCALE": 2})
+    with pytest.raises(AcadError, match="The drawing has"):
+        settings.add_dimension_style("X", text_style="NOPE")
+    assert [s.Name for s in fake_app.doc.DimStyles.items] == ["Standard", "ARCH-DIM", "GD-3IN"]
+
+
+def test_existing_dimension_style_is_made_current_changed_and_its_dimensions_rebuilt(fake_app):
+    session.mark_owned(fake_app.doc)
+    updates = []
+    dim = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbRotatedDimension", StyleName="ARCH-DIM"))
+    dim.Update = lambda: updates.append("dim")
+    out = settings.add_dimension_style("arch-dim", {"DIMSCALE": 48})
+    style = fake_app.doc.ActiveDimStyle
+    assert not out["created"] and style.Name == "ARCH-DIM" and style.copied["DIMSCALE"] == 48.0
+    assert out["dimensions_rebuilt"] == 1 and updates == ["dim"]
+
+
+def test_failed_dimension_style_leaves_no_style_and_no_changed_setting(fake_app):
+    session.mark_owned(fake_app.doc)
+    fake_app.doc.variables["DIMSCALE"] = 1.0
+    with pytest.raises(RuntimeError):
+        settings.add_dimension_style("NEW", {"DIMSCALE": 8, "DIMGAP": -999})  # the fake refuses -999
+    assert fake_app.doc.variables["DIMSCALE"] == 1.0 and fake_app.doc.ActiveDimStyle.Name == "Standard"
+    assert [s.Name for s in fake_app.doc.DimStyles.items] == ["Standard", "ARCH-DIM"]
+
+
+def test_multileader_style_takes_the_plot_scale(fake_app):
+    session.mark_owned(fake_app.doc)
+    out = settings.add_multileader_style("GD-NOTES-3IN", scale=4, text_height=0.09375, text_style="notes-text")
+    assert out == {"name": "GD-NOTES-3IN", "created": True, "scale": 4.0, "text_height": 0.09375,
+                   "arrow_size": 0.18, "text_style": "NOTES-TEXT", "current": True}
+    assert fake_app.doc.variables["CMLEADERSTYLE"] == "GD-NOTES-3IN"
+    changed = settings.add_multileader_style("notes", scale=48, make_current=False)
+    assert (changed["name"], changed["created"], changed["scale"], changed["current"]) == ("NOTES", False, 48.0, False)
+    with pytest.raises(AcadError, match="scale must be positive"):
+        settings.add_multileader_style("X", scale=0)
+    with pytest.raises(AcadError, match="The drawing has"):
+        settings.add_multileader_style("Y", text_style="NOPE")
+    names = [s.Name for s in fake_app.doc.Dictionaries.Item("ACAD_MLEADERSTYLE").items]
+    assert names == ["Standard", "NOTES", "GD-NOTES-3IN"]  # the failed one was removed again
+
+
+def test_add_layer_sets_the_plot_flag_only_when_asked(fake_app):
+    session.mark_owned(fake_app.doc)
+    assert layers.add_layer("S-ANNO-NPLT", color=9, plot=False)["plottable"] is False
+    assert layers.add_layer("S-ANNO-NPLT", color=9)["plottable"] is False  # left as it is
+    assert layers.add_layer("S-ANNO-NPLT", color=9, plot=True)["plottable"] is True
+
+
+def test_page_setup_picks_one_paper_and_plots_the_layout_at_full_size(fake_app):
+    session.mark_owned(fake_app.doc)
+    sheet = fake_app.doc.Layouts.Item(0)
+    out = sheets.set_page_setup("sheet1", "ANSI full bleed B (17.00 x 11.00 Inches)", plot_style="monochrome.ctb")
+    assert out == {"layout": "Sheet1", "device": "DWG To PDF.pc3",
+                   "paper": "ANSI_full_bleed_B_(17.00_x_11.00_Inches)",
+                   "paper_name": "ANSI full bleed B (17.00 x 11.00 Inches)", "plot_style": "monochrome.ctb",
+                   "plot_area": "layout", "scale": "1:1"}
+    assert (sheet.PlotType, sheet.PlotRotation, sheet.UseStandardScale, sheet.StandardScale) == (5, 0, True, 16)
+    assert sheets.set_page_setup("Sheet1", "ansi_a_(11.00_x_8.50_inches)")["paper_name"].startswith("ANSI A")
+    with pytest.raises(AcadError, match="matches several paper sizes: ANSI B .17.00 x 11.00 Inches.; ANSI full"):
+        sheets.set_page_setup("Sheet1", "17.00 x 11.00")
+    with pytest.raises(AcadError, match="No plot style table matches 'company.ctb'"):
+        sheets.set_page_setup("Sheet1", "ANSI B (17.00 x 11.00 Inches)", plot_style="company.ctb")
+    assert sheet.CanonicalMediaName == "ANSI_A_(11.00_x_8.50_Inches)"  # both failures put the paper back
+    assert sheet.StyleSheet == "monochrome.ctb"  # an empty plot_style keeps the table
+    with pytest.raises(AcadError, match="not Model"):
+        sheets.set_page_setup("Model", "ANSI A")
+
+
+def test_page_setup_refuses_a_user_drawing(fake_app):
+    with pytest.raises(AcadError, match="locked"):
+        sheets.set_page_setup("Sheet1", "ANSI A")
+    assert fake_app.doc.Layouts.Item(0).ConfigName == "None"
+
+
+def test_insert_block_on_a_sheet_goes_to_its_paper_space(fake_app):
+    session.mark_owned(fake_app.doc)
+
+    class _Blocks:
+        def Item(self, name):  # noqa: N802
+            return name
+    fake_app.doc.Blocks = _Blocks()
+    info = blocks.insert_block("GD-TITLE-B", [0, 0], layout="sheet1")
+    assert info["layout"] == "Sheet1"
+    assert [e.Handle for e in fake_app.doc.paper.items] == [info["handle"]] and fake_app.doc.space.items == []
+    assert "layout" not in blocks.insert_block("GD-TITLE-B", [0, 0])  # model space, as before
+    with pytest.raises(AcadError, match="No layout named"):
+        blocks.insert_block("GD-TITLE-B", [0, 0], layout="A-101")
+
+
+def test_attribute_definition_modes_and_checks(fake_app):
+    session.mark_owned(fake_app.doc)
+    info = blocks.add_attribute_definition("sheet", [1, 2], 0.125, prompt="Sheet number", default="S-501")
+    att = fake_app.doc.HandleToObject(info["handle"])
+    assert (info["tag"], info["prompt"], info["default"]) == ("SHEET", "Sheet number", "S-501")
+    assert att.Mode == 16 and att.InsertionPoint == (1, 2, 0)  # position locked by default
+    hidden = blocks.add_attribute_definition("REV", [1, 1], 0.125, invisible=True, lock_position=False)
+    assert fake_app.doc.HandleToObject(hidden["handle"]).Mode == 1 and hidden["prompt"] == "REV"
+    with pytest.raises(AcadError, match="without spaces"):
+        blocks.add_attribute_definition("SHEET NO", [0, 0], 0.125)
+    with pytest.raises(AcadError, match="height must be positive"):
+        blocks.add_attribute_definition("DATE", [0, 0], 0)
+    with pytest.raises(AcadError, match="No layer named"):
+        blocks.add_attribute_definition("DATE", [0, 0], 0.125, layer="NOPE")
+    assert fake_app.doc.ModelSpace.Count == 2  # the one on a missing layer was removed again

@@ -131,6 +131,11 @@ class FakeSpace:
     def AddCircle(self, center, radius):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbCircle", Center=_xyz(center), Radius=radius))
 
+    def AddAttribute(self, height, mode, prompt, insertion, tag, value):  # noqa: N802
+        return self._add(FakeEntity(self.doc, "AcDbAttributeDefinition", Height=height, Mode=mode,
+                                    PromptString=prompt, InsertionPoint=_xyz(insertion), TagString=tag.upper(),
+                                    TextString=value))
+
     def AddMLeader(self, points, index):  # noqa: N802
         flat = list(_xyz(points))
         triples = [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
@@ -159,8 +164,31 @@ class FakeViewport(FakeEntity):
 
 
 class FakeLayout:
+    PAPERS = {"ANSI_A_(11.00_x_8.50_Inches)": "ANSI A (11.00 x 8.50 Inches)",
+              "ANSI_B_(17.00_x_11.00_Inches)": "ANSI B (17.00 x 11.00 Inches)",
+              "ANSI_full_bleed_B_(17.00_x_11.00_Inches)": "ANSI full bleed B (17.00 x 11.00 Inches)",
+              "ANSI_B_(11.00_x_17.00_Inches)": "ANSI B (11.00 x 17.00 Inches)"}
+
     def __init__(self, name: str, tab_order: int, block: FakeSpace, model: bool = False) -> None:
         self.Name, self.TabOrder, self.Block, self.ModelType = name, tab_order, block, model
+        self.ConfigName, self.CanonicalMediaName, self.StyleSheet = "None", "Letter_(8.50_x_11.00_Inches)", ""
+        self.PlotType, self.PlotRotation, self.UseStandardScale, self.StandardScale = 0, 1, False, 0
+        self.refreshed = 0
+
+    def RefreshPlotDeviceInfo(self) -> None:  # noqa: N802
+        self.refreshed += 1
+
+    def GetPlotDeviceNames(self):  # noqa: N802
+        return ("None", "DWG To PDF.pc3")
+
+    def GetCanonicalMediaNames(self):  # noqa: N802
+        return tuple(self.PAPERS)
+
+    def GetLocaleMediaName(self, name: str) -> str:  # noqa: N802
+        return self.PAPERS.get(name, name)
+
+    def GetPlotStyleTableNames(self):  # noqa: N802
+        return ("acad.ctb", "monochrome.ctb", "monochrome.stb")
 
 
 class FakeLayouts:
@@ -228,11 +256,29 @@ class FakeNamed:
     """A named collection (DimStyles, TextStyles) or dictionary of styles."""
 
     class Style:
-        def __init__(self, name: str) -> None:
-            self.Name = name
+        def __init__(self, name: str, collection: FakeNamed | None = None) -> None:
+            self.Name, self.collection, self.copied = name, collection, None
+            self.FontFile, self.Height, self.Width, self.ObliqueAngle = "txt.shx", 0.0, 1.0, 0.0  # text style
+            self.ScaleFactor, self.TextHeight, self.ArrowSize, self.TextStyle = 1.0, 0.18, 0.18, "Standard"
+            self.LandingGap, self.DoglegLength = 0.09, 0.36  # multileader style
+
+        def CopyFrom(self, source) -> None:  # noqa: N802 - a dimension style takes the drawing's settings
+            self.copied = dict(source.variables)
+
+        def Delete(self) -> None:  # noqa: N802
+            self.collection.items.remove(self)
 
     def __init__(self, items: list) -> None:
         self.items = items
+
+    def Add(self, name: str):  # noqa: N802
+        style = FakeNamed.Style(name, self)
+        self.items.append(style)
+        return style
+
+    def AddObject(self, name: str, class_name: str):  # noqa: N802
+        assert class_name == "AcDbMLeaderStyle"
+        return self.Add(name)
 
     @property
     def Count(self) -> int:  # noqa: N802
@@ -277,10 +323,12 @@ class FakeDoc:
         self.ActiveTextStyle = self.TextStyles.Item(0)
         self.variables["CMLEADERSTYLE"] = "Standard"
 
+        mleader_styles = FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("NOTES")])
+
         class _Dictionaries:
             def Item(self, key: str):  # noqa: N802
                 assert key == "ACAD_MLEADERSTYLE"
-                return FakeNamed([FakeNamed.Style("Standard"), FakeNamed.Style("NOTES")])
+                return mleader_styles
         self.Dictionaries = _Dictionaries()
 
     def Regen(self, which: int) -> None:  # noqa: N802
@@ -375,7 +423,10 @@ def fake_app(monkeypatch, tmp_path):
     monkeypatch.setattr(session_module, "OWNED_RECORD", tmp_path / "owned.json")
     monkeypatch.setattr(session, "unlocked", set())
     monkeypatch.setattr(session, "allow_all_edits", False)
-    monkeypatch.setattr(enums, "_values", {"acRed": 1, "acVpCustomScale": 1})
+    monkeypatch.setattr(enums, "_values", {
+        "acRed": 1, "acVpCustomScale": 1, "acLayout": 5, "ac0degrees": 0, "ac1_1": 16,
+        "acAttributeModeInvisible": 1, "acAttributeModeConstant": 2, "acAttributeModePreset": 8,
+        "acAttributeModeLockPosition": 16})
     monkeypatch.setattr(session_module, "SETTLE_PAUSE", 0)
     monkeypatch.setattr(session, "hwnd", None)
     return app
