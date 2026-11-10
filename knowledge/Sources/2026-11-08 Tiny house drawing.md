@@ -34,5 +34,5 @@ Question: can the released 0.1.3 server (42 tools) draw a small, complete archit
 - **inferred (from the bounding box, not seen on screen):** `add_leader` in a drawing from the default template used the Standard multileader style at its own text height, far too small at 1/2" = 1'-0" (the box was about 4" wide for 18 characters). DIMSCALE does not scale multileaders. The leader was replaced by a polyline and TEXT. Recorded in [[Research/AutoCAD API gotchas]]. A scaled multileader style (or a scale option in `add_leader`) would fix this; not done.
 
 ## Not covered
-- `run_command` and the Block Editor tools (not on `main` yet; [PR #19](https://github.com/ajaquin8/autocad-mcp/pull/19)).
+- `run_command` and the Block Editor tools: not on `main` during this run; merged afterwards in [PR #19](https://github.com/ajaquin8/autocad-mcp/pull/19), still not live-tested.
 - Sheet layouts, viewports and plotting of this drawing.

@@ -8,9 +8,7 @@ waiting on AutoCAD).
 
 from __future__ import annotations
 
-import ctypes
 import os
-from ctypes import wintypes
 
 import win32gui
 from mcp.server.mcpserver.exceptions import ToolError
@@ -19,18 +17,12 @@ from mcp_types import ToolAnnotations
 from ..app import mcp
 from ..com import AcadError
 from ..session import recorded_owned_keys, session
-from ..winui import describe_blockers
+from ..winui import describe_blockers, send_input
 
-WM_COPYDATA = 0x004A
-SMTO_ABORTIFHUNG = 0x0002
 # Two Ctrl+C, the "^C^C" of menu macros: cancels a command and its prompt. Handed to AutoCAD as
 # command-line input (WM_COPYDATA, dwData 1). Verified live 2026-11-04: it cleared LINE waiting at
 # its first prompt, where WM_CHAR/WM_KEYDOWN Esc to the main window did nothing.
 CANCEL_INPUT = "\x03\x03"
-
-
-class _CopyData(ctypes.Structure):
-    _fields_ = [("dwData", ctypes.c_size_t), ("cbData", wintypes.DWORD), ("lpData", ctypes.c_void_p)]
 
 
 def owned_names(keys: set[str] | None = None) -> set[str]:
@@ -47,16 +39,6 @@ def owned_in_title(title: str, names: set[str]) -> str | None:
         if text.endswith(name) and (len(text) == len(name) or text[-len(name) - 1] in " \t[-"):
             return name
     return None
-
-
-def send_input(hwnd: int, text: str) -> bool:
-    """Hand text to AutoCAD's command line through WM_COPYDATA; False if AutoCAD did not take it in 5 s."""
-    buf = ctypes.create_unicode_buffer(text)
-    data = _CopyData(1, ctypes.sizeof(buf), ctypes.cast(buf, ctypes.c_void_p))
-    result = ctypes.c_size_t()
-    sent = ctypes.windll.user32.SendMessageTimeoutW(wintypes.HWND(hwnd), WM_COPYDATA, None, ctypes.byref(data),
-                                                    SMTO_ABORTIFHUNG, 5000, ctypes.byref(result))
-    return bool(sent)
 
 
 def cancel() -> str:
