@@ -127,3 +127,8 @@ All **reported** from the notes of the session that ran the batch (seen there in
 - **reported:** a plain window selection misses wide text (attribute definitions, MTEXT) that sticks out of a narrow band. For a centre action, select with a crossing window, then remove polylines and dimensions (`(ssget "_X" '((0 . "LWPOLYLINE,DIMENSION")))`), or they move by half.
 - **reported:** right after the last reference to a dynamic block is deleted, `-PURGE` still finds no unreferenced blocks: its anonymous `*U` copy counts until save and reopen.
 - **inferred (offline, 2026-11-06):** while a modal dialog is open, AutoCAD's main window is disabled and the dialog is a visible, enabled top-level window of the same process (class `#32770` for message boxes and task dialogs). Busy errors now list such windows. Task dialogs draw their own buttons, so their buttons may not be listed. **unresolved:** not yet seen live.
+
+## 2026-11-08: multileaders and dimension overrides (from [[Sources/2026-11-08 Tiny house drawing]])
+- **inferred (bounding box, not seen on screen):** in a drawing from the default template, `add_leader` uses the Standard multileader style at its own small text height; DIMSCALE does not scale multileaders. At 1/2" = 1'-0" the note is unreadable. Until a scaled style exists, use a polyline plus TEXT, or bring a multileader style in from a template and select it with `set_current_styles`.
+- **verified:** a dimension `text_override` takes the measured value as a plain `<>`. An HTML-escaped `&lt;&gt;` is shown literally.
+- **verified:** if the server files change while the MCP server is running, a traceback shows lines from the new files on disk while the old code runs. Restart Claude after switching branches or pulling.

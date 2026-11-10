@@ -196,3 +196,8 @@ Writer: Claude Code side session, from the plan in the 2026-11-06 drafting-templ
   - `session.py`: the busy refusal says what CMDACTIVE means (for example "a command and an AutoLISP expression").
 - New: [[Sources/2026-11-06 Stretch grips by script]] (AMCP-LIVE-20261106-01), written from that session's notes. Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Decisions/Edit guard and document safety]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]].
 - Tests: 5 new offline tests (83 in total). **Not live-verified.**
+
+## 2026-11-08: tiny house drawing (live)
+Writer: Claude Code (Alex: "Want to draw a cool tiny house…", then "lets do it" and "Restarted, go").
+- New: [[Sources/2026-11-08 Tiny house drawing]] (AMCP-LIVE-20261108-01). Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
+- No code changed. The drawing is in `scratch/` (not in git).
