@@ -60,3 +60,10 @@ Why: in the screw-block work ([[Sources/2026-11-03 Dynamic block authoring]], [[
 5. **An in-process .NET helper** (bigger). Runs commands synchronously with known prompt state, cancels cleanly, and creates fields through the managed API. This brings forward the "only if needed" item under Later. How it is loaded into AutoCAD is Alex's decision (it touches his AutoCAD setup).
 
 Likely to stay manual: filling a lookup or Block Properties Table from scratch (unless the template idea works), and judging the look of a block by eye.
+
+## 2026-11-10: template tools
+Status: **built, not live-verified** (Claude, on Alex's go; branch `feat/template-tools`). See [[Change log]].
+- Covers open items above: creating text, dimension and multileader styles (so leaders work at scales other than 1:1), a sheet's paper size and plot style table, a non-plotting layer, attribute definitions, and a title block inserted on a sheet. All through ActiveX; none through `run_command`.
+- Next: a live batch under [[Decisions/Live test protocol]]: a template with the three styles, a title block drawing with attributes, an ANSI B sheet and one plot.
+- Still open: creating layouts, hatches, saving as `.dwt`, drawing tools in paper space.
+- `run_command` and the Block Editor tools built on it still need their first live run (`tests/live/command_check.py`). **Observed 2026-11-09** on AutoCAD 2027 through the installed Claude desktop extension: the expression did not start, and the fallback Enter opened a Help dialog. Also seen there: the Microsoft Store build of Claude gives the server a private copy of `%LOCALAPPDATA%\autocad-mcp`, so AutoCAD cannot see a transcript folder the server creates.

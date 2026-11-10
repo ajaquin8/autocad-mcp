@@ -215,3 +215,24 @@ Writer: Claude Code side session.
 - New live script `tests/live/command_check.py` (not run: it needs Alex's go).
 - Updated: README, [[Projects/AutoCAD-MCP/Roadmap]] item 3, the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (49 tools).
 - Tests: 8 new offline tests (101 in total). **Not live-verified**; inferred: a linear parameter's line runs through the label location (the pick point relies on it).
+
+## 2026-11-10: template tools without the command line
+Writer: Claude, in a Claude desktop session building a steel-detailing drawing template (Alex: "please proceed with option 1"). Branch `feat/template-tools`, not pushed.
+- Why: building a drawing template through the installed extension on AutoCAD 2027 (2026-11-09) needed text, dimension and multileader styles, a paper size, a non-plotting layer and a title block on a sheet. None of these had a tool, and `run_command` did not work there. That is **observed** in ordinary use, not a test batch: the expression never started, no transcript file appeared, and AutoCAD showed a Help dialog after the tool's fallback Enter. The cause is **unresolved**.
+- New tools, all plain ActiveX inside `session.edit` (edit guard, busy guard, one undo step, rollback):
+  - `tools/settings.py`: `add_text_style` (`TextStyles.Add`, `FontFile`, height, width factor, oblique angle); `add_dimension_style` (`DimStyles.Add`, then `CopyFrom` the document; takes DIM* variables, a text style and an arrowhead; the style becomes current); `add_multileader_style` (an `AcDbMLeaderStyle` in the `ACAD_MLEADERSTYLE` dictionary; `ScaleFactor`, text height, arrow size, text style).
+  - `tools/sheets.py`: `set_page_setup` (plot device, paper size by the name Page Setup shows, plot style table; the layout is plotted 1:1 without rotation).
+  - `tools/blocks.py`: `add_attribute_definition` (`ModelSpace.AddAttribute`, position locked by default).
+- Changed tools:
+  - `insert_block` takes `layout` and then inserts into that sheet's paper space; without it, model space as before.
+  - `add_layer` takes `plot`, the layer's plot flag.
+  - `set_drawing_variables` also takes DIMTAD, DIMTIH, DIMTOH, DIMFRAC, DIMEXO, DIMEXE and DIMGAP. Its validation and its dimension rebuild moved into `checked()` and `rebuild_dimensions()`, which `add_dimension_style` shares.
+- Version 0.1.4. Updated: README Tools, the server instructions, [[Projects/AutoCAD-MCP/Roadmap]], [[Projects/AutoCAD-MCP/index]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (54 tools).
+- Sources: AutoCAD 2027 ActiveX Reference Guide (help.autodesk.com, read 2026-11-10) for `TextStyle.FontFile`, `DimStyle.CopyFrom`, the `MLeaderStyle` object, the `Layout` plot members and `AddAttribute`; the DIMBLK system variable page for the arrowhead names.
+- Tests: 12 new offline tests (113 in total); `scripts\check.ps1` passes. **Not live-verified:** none of the new COM calls has run against AutoCAD. To check live:
+  - a TrueType file name (`arial.ttf`) in `FontFile`;
+  - DIMTIH and DIMTOH as 0/1 through `SetVariable`;
+  - a `DIMBLK` name before that arrowhead block exists in the drawing;
+  - an empty attribute default;
+  - `InsertBlock` on the block of a layout that is not the current tab;
+  - the paper names each plot device lists, and whether a new multileader style needs more than the four sizes copied from the current one.

@@ -35,6 +35,9 @@ An MCP server that lets Claude drive the AutoCAD 2027 session already running on
 ## 2026-11-03: sheet tools (0.1.3)
 - **verified** ([[Sources/2026-11-03 Sheet tools]]): `add_viewport`, `list_layouts`, `query_entities` on a layout, `add_leader`, `draw_center_mark` and `set_current_styles` produced a complete plotted part sketch on a real title-block sheet. `add_radial_dimension` is offline-tested only. 38 tools.
 
+## 2026-11-10: template tools (0.1.4)
+- **built, not live-verified** ([[Change log]]): `add_text_style`, `add_dimension_style`, `add_multileader_style`, `set_page_setup` and `add_attribute_definition`; `insert_block` onto a sheet; a plot flag in `add_layer`. 54 tools. The new ones are offline-tested only.
+
 ## History
 - 2026-10-29: Alex compared the existing AutoCAD MCP servers ([[Research/AutoCAD MCP landscape]]) and chose to build one in the style of inventor-mcp.
 
