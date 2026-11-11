@@ -145,7 +145,10 @@ def set_page_setup(layout: str, paper: str, plot_style: str = "", device: str = 
 
         def restore() -> None:
             for prop, value in old:
-                setattr(sheet, prop, value)
+                # A layout never set up has no paper name, and AutoCAD refuses "" (verified 2026-11-11);
+                # it then keeps the default paper of the device that was put back.
+                if prop != "CanonicalMediaName" or value:
+                    setattr(sheet, prop, value)
         change.on_rollback(restore)
         sheet.RefreshPlotDeviceInfo()
         sheet.ConfigName = match_one(device, _strings(sheet.GetPlotDeviceNames()), "plot device")

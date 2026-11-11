@@ -67,6 +67,15 @@ def find_named(collection, wanted: str):
     return None
 
 
+def mleader_text_style(style) -> str:
+    """The multileader style's text style name, or "" when it has none: a style made over COM
+    starts without one, and reading it then fails (verified 2026-11-11)."""
+    try:
+        return str(style.TextStyle)
+    except pywintypes.com_error:
+        return ""
+
+
 def font_file(font: str) -> str:
     """A TrueType file given by name only becomes its full path in a Windows Fonts folder: AutoCAD
     takes romans.shx by name but refuses arial.ttf (verified 2026-11-10). Anything else is kept."""
@@ -345,7 +354,8 @@ def add_multileader_style(style: str, scale: float = 1, text_height: float = 0, 
     scale factor so callouts come out the same size on paper as dimensions: 4 for 3" = 1'-0",
     48 for 1/4" = 1'-0", like DIMSCALE. One undo step.
 
-    A new style starts with the text, arrow and landing sizes of the current multileader style.
+    A new style starts with the text style and the text, arrow and landing sizes of the current
+    multileader style.
 
     Args:
         style: multileader style name, e.g. "NOTES-3IN".
@@ -375,9 +385,13 @@ def add_multileader_style(style: str, scale: float = 1, text_height: float = 0, 
             base = by_name.get(str(doc.GetVariable("CMLEADERSTYLE")).lower())
             for prop in MLEADER_SIZES if base else ():
                 setattr(target, prop, getattr(base[1], prop))
+            # A style made over COM has no text style: give it the current style's, else the current text style.
+            target.TextStyle = (mleader_text_style(base[1]) if base else "") or str(doc.ActiveTextStyle.Name)
         else:
             label, target = by_name[label.lower()]
-            old = [(prop, getattr(target, prop)) for prop in ("ScaleFactor", "TextHeight", "ArrowSize", "TextStyle")]
+            old = [(prop, getattr(target, prop)) for prop in ("ScaleFactor", "TextHeight", "ArrowSize")]
+            if mleader_text_style(target):
+                old.append(("TextStyle", mleader_text_style(target)))
 
             def restore(t=target, o=old) -> None:
                 for prop, value in o:
@@ -396,5 +410,5 @@ def add_multileader_style(style: str, scale: float = 1, text_height: float = 0, 
             change.on_rollback(lambda: doc.SetVariable("CMLEADERSTYLE", previous))
         return {"name": label, "created": created, "scale": float(target.ScaleFactor),
                 "text_height": float(target.TextHeight), "arrow_size": float(target.ArrowSize),
-                "text_style": str(target.TextStyle),
+                "text_style": mleader_text_style(target),
                 "current": str(doc.GetVariable("CMLEADERSTYLE")).lower() == label.lower()}

@@ -1397,6 +1397,19 @@ def test_multileader_style_takes_the_plot_scale(fake_app):
     assert names == ["Standard", "NOTES", "GD-NOTES-3IN"]  # the failed one was removed again
 
 
+def test_new_multileader_style_gets_a_text_style(fake_app):
+    # A style made over COM has no text style, and reading it failed (live 2026-11-11).
+    session.mark_owned(fake_app.doc)
+    assert settings.add_multileader_style("PLAIN", scale=2)["text_style"] == "Standard"  # the current style's
+    styles = fake_app.doc.Dictionaries.Item("ACAD_MLEADERSTYLE")
+    styles.items[0]._text_style = None  # now the current multileader style has none either
+    fake_app.doc.variables["CMLEADERSTYLE"] = "Standard"
+    fake_app.doc.ActiveTextStyle = fake_app.doc.TextStyles.Item(1)
+    assert settings.add_multileader_style("PLAIN-2")["text_style"] == "NOTES-TEXT"  # the current text style
+    changed = settings.add_multileader_style("standard", scale=3, make_current=False)  # still without one
+    assert changed["text_style"] == "" and changed["scale"] == 3.0
+
+
 def test_add_layer_sets_the_plot_flag_only_when_asked(fake_app):
     session.mark_owned(fake_app.doc)
     assert layers.add_layer("S-ANNO-NPLT", color=9, plot=False)["plottable"] is False
@@ -1422,6 +1435,17 @@ def test_page_setup_picks_one_paper_and_plots_the_layout_at_full_size(fake_app):
     assert sheet.StyleSheet == "monochrome.ctb"  # an empty plot_style keeps the table
     with pytest.raises(AcadError, match="not Model"):
         sheets.set_page_setup("Model", "ANSI A")
+
+
+def test_failed_page_setup_on_a_layout_never_set_up_rolls_back_cleanly(fake_app):
+    # Such a layout has no paper name, and AutoCAD refuses to be given "" again (live 2026-11-11).
+    session.mark_owned(fake_app.doc)
+    sheet = fake_app.doc.Layouts.Item(0)
+    sheet._media = ""
+    with pytest.raises(AcadError, match="matches several paper sizes") as err:
+        sheets.set_page_setup("Sheet1", "17.00 x 11.00")
+    assert "rollback was incomplete" not in str(err.value)
+    assert (sheet.ConfigName, sheet.PlotRotation) == ("None", 1)
 
 
 def test_page_setup_refuses_a_user_drawing(fake_app):

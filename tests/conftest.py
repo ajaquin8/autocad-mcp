@@ -19,6 +19,11 @@ def _xyz(variant) -> tuple:
     return tuple(getattr(variant, "value", variant))
 
 
+def _com_error(text: str):
+    import pywintypes
+    return pywintypes.com_error(-2147352567, "Exception occurred.", (0, "AutoCAD.Application", text, None, 0, 0), None)
+
+
 class FakeEntity:
     _next_handle = 0x100
 
@@ -171,9 +176,19 @@ class FakeLayout:
 
     def __init__(self, name: str, tab_order: int, block: FakeSpace, model: bool = False) -> None:
         self.Name, self.TabOrder, self.Block, self.ModelType = name, tab_order, block, model
-        self.ConfigName, self.CanonicalMediaName, self.StyleSheet = "None", "Letter_(8.50_x_11.00_Inches)", ""
+        self.ConfigName, self._media, self.StyleSheet = "None", "Letter_(8.50_x_11.00_Inches)", ""
         self.PlotType, self.PlotRotation, self.UseStandardScale, self.StandardScale = 0, 1, False, 0
         self.refreshed = 0
+
+    @property
+    def CanonicalMediaName(self) -> str:  # noqa: N802
+        return self._media
+
+    @CanonicalMediaName.setter
+    def CanonicalMediaName(self, value: str) -> None:  # noqa: N802
+        if not value:  # AutoCAD refuses an empty paper name (live 2026-11-11)
+            raise _com_error("Invalid input")
+        self._media = value
 
     def RefreshPlotDeviceInfo(self) -> None:  # noqa: N802
         self.refreshed += 1
@@ -259,7 +274,7 @@ class FakeNamed:
         def __init__(self, name: str, collection: FakeNamed | None = None) -> None:
             self.Name, self.collection, self.copied = name, collection, None
             self.FontFile, self.Height, self.Width, self.ObliqueAngle = "txt.shx", 0.0, 1.0, 0.0  # text style
-            self.ScaleFactor, self.TextHeight, self.ArrowSize, self.TextStyle = 1.0, 0.18, 0.18, "Standard"
+            self.ScaleFactor, self.TextHeight, self.ArrowSize, self._text_style = 1.0, 0.18, 0.18, "Standard"
             self.LandingGap, self.DoglegLength = 0.09, 0.36  # multileader style
 
         def CopyFrom(self, source) -> None:  # noqa: N802 - a dimension style takes the drawing's settings
@@ -267,6 +282,16 @@ class FakeNamed:
 
         def Delete(self) -> None:  # noqa: N802
             self.collection.items.remove(self)
+
+        @property
+        def TextStyle(self) -> str:  # noqa: N802
+            if self._text_style is None:  # a multileader style made over COM has none (live 2026-11-11)
+                raise _com_error("Null object ID")
+            return self._text_style
+
+        @TextStyle.setter
+        def TextStyle(self, value: str) -> None:  # noqa: N802
+            self._text_style = value
 
     def __init__(self, items: list) -> None:
         self.items = items
@@ -278,7 +303,9 @@ class FakeNamed:
 
     def AddObject(self, name: str, class_name: str):  # noqa: N802
         assert class_name == "AcDbMLeaderStyle"
-        return self.Add(name)
+        style = self.Add(name)
+        style._text_style = None
+        return style
 
     @property
     def Count(self) -> int:  # noqa: N802

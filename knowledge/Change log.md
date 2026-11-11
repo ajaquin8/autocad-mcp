@@ -248,3 +248,13 @@ Writer: Claude, same session (Alex: "Lets go!" for the batch; after its first fa
 - Tests: 2 new offline tests (115 in total); `scripts\check.ps1` passes. The fixes themselves are **not live-verified**, because the installed bundle predates them; the full-path font route they rely on is.
 - Version 0.1.5, so the fixed bundle can be told apart from the 0.1.4 that was installed for the live run.
 - Deviation from [[Decisions/Live test protocol]]: the batch's title-block drawing and its PDF went to the Windows Temp folder, not `scratch/`, and were deleted afterwards.
+
+## 2026-11-11: template tools, second live run and fixes
+Writer: Claude, same session (Alex, after installing 0.1.5: "want to test it now and then I will merge after"). Branch `feat/template-tools`.
+- New: [[Sources/2026-11-11 Template tools second run]] (AMCP-LIVE-20261111-01), on AutoCAD 2027 through Claude's MCP connection: 11 of 13 checks. The three 0.1.5 fixes work live, and so does changing existing styles.
+- Fixes from it:
+  - `add_multileader_style`: a new style now gets a text style (the current multileader style's, else the current text style). Made without one, it had none at all and the tool failed reading it back.
+  - `set_page_setup`: a failed call on a layout never set up no longer reports an incomplete rollback; the empty paper name is not put back, because AutoCAD refuses it.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- Tests: 2 new offline tests (117 in total); `scripts\check.ps1` passes. Version 0.1.6. These two fixes are **not live-verified**.
+- One step used a short COM script instead of the server, on the scratch drawing only, to find which layout property could not be put back.
