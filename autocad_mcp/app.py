@@ -46,7 +46,7 @@ never acts in the user's drawings; if the user is busy, ask them instead. When a
 busy error names an AutoCAD dialog, only the user can answer it.
 """
 
-mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.4")
+mcp = MCPServer(name="autocad", title="Autodesk AutoCAD", instructions=INSTRUCTIONS, version="0.1.5")
 
 
 def _where(err: BaseException) -> str:

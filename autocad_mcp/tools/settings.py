@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pywintypes
 
 from ..app import acad_tool
@@ -63,6 +65,20 @@ def find_named(collection, wanted: str):
         if str(item.Name).lower() == wanted.strip().lower():
             return item
     return None
+
+
+def font_file(font: str) -> str:
+    """A TrueType file given by name only becomes its full path in a Windows Fonts folder: AutoCAD
+    takes romans.shx by name but refuses arial.ttf (verified 2026-11-10). Anything else is kept."""
+    if font.lower().endswith(".shx") or os.path.dirname(font):
+        return font
+    folders = (os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
+               os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts"))
+    for folder in folders:
+        path = os.path.join(folder, font)
+        if os.path.isfile(path):
+            return path
+    raise AcadError(f"No font file '{font}' in the Windows Fonts folders. Give its full path.")
 
 
 def rebuild_dimensions(doc, style: str) -> int:
@@ -211,8 +227,8 @@ def add_text_style(style: str, font: str = "romans.shx", height: float = 0, widt
 
     Args:
         style: text style name, e.g. "NOTES".
-        font: a font file: an AutoCAD .shx (romans.shx, simplex.shx, txt.shx) or a TrueType
-            file from the Windows Fonts folder (arial.ttf), by file name or full path.
+        font: a font file: an AutoCAD .shx by name (romans.shx, simplex.shx, txt.shx), or a
+            TrueType file, by name if it is in a Windows Fonts folder (arial.ttf), else by full path.
         height: fixed text height in drawing units; 0, the usual choice, lets each text and
             dimension set its own height.
         width_factor: character width, 1 is normal (0.01 to 100).
@@ -230,6 +246,7 @@ def add_text_style(style: str, font: str = "romans.shx", height: float = 0, widt
         raise AcadError("width_factor must be between 0.01 and 100.")
     if not -85 <= oblique_angle <= 85:
         raise AcadError("oblique_angle must be between -85 and 85 degrees.")
+    font = font_file(font)
     doc = session.document(name)
     with session.edit(doc) as change:
         target = find_named(doc.TextStyles, label)
@@ -244,8 +261,8 @@ def add_text_style(style: str, font: str = "romans.shx", height: float = 0, widt
             change.on_rollback(restore)
         try:
             target.FontFile = font
-        except pywintypes.com_error:
-            raise AcadError(f"AutoCAD could not use the font file '{font}'. Check the name.") from None
+        except (pywintypes.com_error, AttributeError):  # AutoCAD's refusal arrives as an AttributeError
+            raise AcadError(f"AutoCAD did not accept the font file '{font}'.") from None
         target.Height = float(height)
         target.Width = float(width_factor)
         target.ObliqueAngle = rad(oblique_angle)

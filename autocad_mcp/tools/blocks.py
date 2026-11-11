@@ -371,7 +371,7 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
     insert it by path with insert_block, and the block has these attributes to fill in.
 
     Args:
-        tag: the attribute's name, e.g. "SHEET" (no spaces or "!"; AutoCAD makes it upper case).
+        tag: the attribute's name, e.g. "SHEET" (no spaces or "!"; stored in upper case).
         position: where the text starts [x, y] (its left end, on the baseline).
         height: text height in drawing units.
         prompt: the question AutoCAD asks when the block is inserted by hand (default: the tag).
@@ -384,7 +384,7 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
         layer: layer to put it on (default: current layer).
         name: which open drawing (default: active).
     """
-    label = tag.strip()
+    label = tag.strip().upper()  # over COM AutoCAD keeps the case as given (verified 2026-11-10)
     if not label or any(c in label for c in " !"):
         raise AcadError("tag must be a name without spaces or '!', e.g. SHEET or DRAWN_BY.")
     if height <= 0:

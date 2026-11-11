@@ -133,8 +133,8 @@ class FakeSpace:
 
     def AddAttribute(self, height, mode, prompt, insertion, tag, value):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbAttributeDefinition", Height=height, Mode=mode,
-                                    PromptString=prompt, InsertionPoint=_xyz(insertion), TagString=tag.upper(),
-                                    TextString=value))
+                                    PromptString=prompt, InsertionPoint=_xyz(insertion), TagString=tag,
+                                    TextString=value))  # the tag keeps its case, as over COM (2026-11-10)
 
     def AddMLeader(self, points, index):  # noqa: N802
         flat = list(_xyz(points))

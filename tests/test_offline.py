@@ -1288,13 +1288,45 @@ def test_text_style_is_created_then_updated(fake_app):
     made = settings.add_text_style("GD-NOTES", font="romans.shx", width_factor=0.9, make_current=True)
     assert made["created"] and made["current"] and (made["font"], made["width_factor"]) == ("romans.shx", 0.9)
     assert fake_app.doc.ActiveTextStyle.Name == "GD-NOTES"
-    again = settings.add_text_style("gd-notes", font="arial.ttf", oblique_angle=15)
-    assert not again["created"] and again["font"] == "arial.ttf" and again["oblique_angle"] == pytest.approx(15)
+    again = settings.add_text_style("gd-notes", font="simplex.shx", oblique_angle=15)
+    assert not again["created"] and again["font"] == "simplex.shx" and again["oblique_angle"] == pytest.approx(15)
     assert [s.Name for s in fake_app.doc.TextStyles.items].count("GD-NOTES") == 1
     with pytest.raises(AcadError, match="font file"):
         settings.add_text_style("X", font="Arial")
     with pytest.raises(AcadError, match="not a usable text style name"):
         settings.add_text_style("A/B")
+
+
+def test_truetype_font_by_name_becomes_its_full_path(fake_app, monkeypatch, tmp_path):
+    # AutoCAD took romans.shx by name but refused arial.ttf; the full path worked (live 2026-11-10).
+    session.mark_owned(fake_app.doc)
+    fonts = tmp_path / "Fonts"
+    fonts.mkdir()
+    (fonts / "arial.ttf").write_bytes(b"")
+    monkeypatch.setenv("WINDIR", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nowhere"))
+    assert settings.add_text_style("GD-ARIAL", font="arial.ttf")["font"] == str(fonts / "arial.ttf")
+    assert settings.add_text_style("GD-ARIAL", font=r"D:\fonts\mine.ttf")["font"] == r"D:\fonts\mine.ttf"
+    with pytest.raises(AcadError, match="No font file 'nope.ttf'"):
+        settings.add_text_style("X", font="nope.ttf")
+
+
+def test_a_refused_font_file_gets_a_plain_message_and_no_style(fake_app):
+    session.mark_owned(fake_app.doc)
+    deleted = []
+
+    class _Refusing:
+        Name = "X"
+
+        def __setattr__(self, key, value):
+            raise AttributeError("Property 'Add.FontFile' can not be set.")
+
+        def Delete(self):  # noqa: N802
+            deleted.append(True)
+    fake_app.doc.TextStyles.Add = lambda name: _Refusing()
+    with pytest.raises(AcadError, match="did not accept the font file 'weird.shx'"):
+        settings.add_text_style("X", font="weird.shx")
+    assert deleted == [True]
 
 
 def test_failed_text_style_change_is_put_back(fake_app):
