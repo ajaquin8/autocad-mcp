@@ -236,3 +236,15 @@ Writer: Claude, in a Claude desktop session building a steel-detailing drawing t
   - an empty attribute default;
   - `InsertBlock` on the block of a layout that is not the current tab;
   - the paper names each plot device lists, and whether a new multileader style needs more than the four sizes copied from the current one.
+
+## 2026-11-10: template tools, first live run and fixes
+Writer: Claude, same session (Alex: "Lets go!" for the batch; after its first failure, "keep pushing and keep testing as we build"). Branch `feat/template-tools`, not pushed.
+- New: [[Sources/2026-11-10 Template tools]] (AMCP-LIVE-20261110-01). The 0.1.4 bundle was installed in Claude desktop and the tools were called through Claude's MCP connection on AutoCAD 2027: 14 of 15 checks.
+- Fixes from it:
+  - `add_text_style`: a TrueType file given by name is looked up in the Windows Fonts folders and passed as a full path, because AutoCAD refused `arial.ttf` by name. A refused font now gets a plain message (the refusal is an `AttributeError`).
+  - `add_attribute_definition`: the tool makes the tag upper case, because AutoCAD kept `title` as typed.
+  - `add_dimension`: its description says where the text goes when it does not fit.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]] (two new sections, one on `run_command` as observed through the extension), [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- Tests: 2 new offline tests (115 in total); `scripts\check.ps1` passes. The fixes themselves are **not live-verified**, because the installed bundle predates them; the full-path font route they rely on is.
+- Version 0.1.5, so the fixed bundle can be told apart from the 0.1.4 that was installed for the live run.
+- Deviation from [[Decisions/Live test protocol]]: the batch's title-block drawing and its PDF went to the Windows Temp folder, not `scratch/`, and were deleted afterwards.
