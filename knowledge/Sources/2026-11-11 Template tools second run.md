@@ -28,7 +28,7 @@ Question: do the 0.1.5 fixes work against AutoCAD, and do the paths the first ru
 - The scratch drawing's layouts had the PC's default Windows printer as plot device. Layout2, never opened, had an empty paper name.
 - After changing device and paper, every old value went back except the paper name: AutoCAD refuses the empty string ("Invalid input"), with or without `RefreshPlotDeviceInfo`. The layout then showed the restored device's default paper.
 
-## Changed after this run (offline-tested only)
+## Changed after this run (verified live in [[Sources/2026-11-11 Template tools third run]])
 - `add_multileader_style` gives a new style a text style: the current multileader style's, else the current text style.
 - `set_page_setup` does not try to put an empty paper name back.
 

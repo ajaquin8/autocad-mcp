@@ -152,7 +152,7 @@ All **reported** from the notes of the session that ran the batch (seen there in
 - **verified 2026-11-09:** in the Microsoft Store build of Claude, the server's `%LOCALAPPDATA%\autocad-mcp` is a private copy under the app's package folder. The real folder did not exist until Alex created it, and AutoCAD cannot see the private one. Creating the real `run` folder did not make `run_command` work.
 
 ## 2026-11-11: more on styles and page setup ([[Sources/2026-11-11 Template tools second run]])
-- **verified:** a multileader style made with `AddObject` has no text style at all. Reading `TextStyle` then fails with "Null object ID". Set one when creating the style.
+- **verified:** a multileader style made with `AddObject` has no text style at all. Reading `TextStyle` then fails with "Null object ID". Set one when creating the style; setting it to a text style's name works ([[Sources/2026-11-11 Template tools third run]]).
 - **verified:** `Layout.CanonicalMediaName` is an empty string on a layout that was never set up, and AutoCAD refuses to be given the empty string back ("Invalid input"). After `ConfigName` is put back, such a layout takes that device's default paper.
 - **verified:** changing a text style's `FontFile` changes text already drawn in it after a regen. Changing a multileader style's `ScaleFactor` resizes leaders already drawn in it. Dimensions follow a changed dimension style once each is updated (as noted on 2026-10-29).
 - **observed:** the layouts of a new drawing had the PC's default Windows printer as their plot device that day. Which device a new drawing gets is AutoCAD's own setting, so `set_page_setup` should not assume one.

@@ -38,7 +38,7 @@ An MCP server that lets Claude drive the AutoCAD 2027 session already running on
 ## 2026-11-10: template tools (0.1.4)
 - **built, not live-verified** ([[Change log]]): `add_text_style`, `add_dimension_style`, `add_multileader_style`, `set_page_setup` and `add_attribute_definition`; `insert_block` onto a sheet; a plot flag in `add_layer`. 54 tools. The new ones are offline-tested only.
 - **verified 2026-11-10** ([[Sources/2026-11-10 Template tools]]): the five new tools, the `layout` argument of `insert_block` and the plot flag of `add_layer` worked on AutoCAD 2027 through Claude's MCP connection, on new styles and a new sheet (14 of 15 checks). Changing existing styles, and AutoCAD 2026, are not yet tried. This **supersedes** "offline-tested only" above.
-- **verified 2026-11-11** ([[Sources/2026-11-11 Template tools second run]]): the 0.1.5 fixes work, and so does changing an existing text, dimension or multileader style (what is already drawn follows). Two more faults were found and fixed in 0.1.6, offline-tested only: a new multileader style without a text style, and the rollback of a failed page setup on a layout never set up.
+- **verified 2026-11-11** ([[Sources/2026-11-11 Template tools second run]]): the 0.1.5 fixes work, and so does changing an existing text, dimension or multileader style (what is already drawn follows). Two more faults were found and fixed in 0.1.6: a new multileader style without a text style, and the rollback of a failed page setup on a layout never set up. Both fixes are **verified 2026-11-11** ([[Sources/2026-11-11 Template tools third run]]).
 
 ## History
 - 2026-10-29: Alex compared the existing AutoCAD MCP servers ([[Research/AutoCAD MCP landscape]]) and chose to build one in the style of inventor-mcp.

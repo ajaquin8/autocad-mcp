@@ -258,3 +258,9 @@ Writer: Claude, same session (Alex, after installing 0.1.5: "want to test it now
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
 - Tests: 2 new offline tests (117 in total); `scripts\check.ps1` passes. Version 0.1.6. These two fixes are **not live-verified**.
 - One step used a short COM script instead of the server, on the scratch drawing only, to find which layout property could not be put back.
+
+## 2026-11-11: the 0.1.6 fixes, checked live
+Writer: Claude, same session (Alex installed the 0.1.6 bundle: "Okay its installed"). Branch `feat/template-tools`.
+- New: [[Sources/2026-11-11 Template tools third run]] (AMCP-LIVE-20261111-02), on AutoCAD 2027 through Claude's MCP connection: 3 of 3 checks. Both 0.1.6 fixes work live. This **supersedes** "not live-verified" in the entry above.
+- Updated: [[Sources/index]], [[Sources/2026-11-11 Template tools second run]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- No code change.
