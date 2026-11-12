@@ -281,3 +281,9 @@ Writer: Claude, in a Claude desktop session, on Alex's go ("Yes"). Branch `fix/r
 - Tests: the fake command line follows the new protocol; 2 tests replaced, 1 added. `ruff` and the offline tests pass.
 - Live: 22 of 22 checks with the repo code (hatch with an island, true colour, 25 answers, new layout, cancel and undo). **Not verified** through the installed extension, which is still 0.1.6.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/Roadmap]].
+
+## 2026-11-11: run_command checked through the installed 0.1.7 bundle
+Writer: Claude, same session (Alex installed the bundle and restarted Claude). Branch `fix/run-command-input-limit`.
+- [[Sources/2026-11-11 run_command input limit]] gained a section: 9 of 9 checks through Claude's own MCP connection (hatch, true colour, explode, layout rename and new, cancel and undo). This **supersedes** "not verified through the installed extension" in the entry above.
+- Found: `get_entity` reports a true colour as its nearest index colour; EXPLODE takes one object and no closing Enter.
+- No code change.

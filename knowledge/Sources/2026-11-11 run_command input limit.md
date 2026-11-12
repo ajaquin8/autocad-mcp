@@ -26,8 +26,16 @@ Branch `fix/run-command-input-limit`. `run_command` now sends short complete exp
 - **-LAYOUT** New "GD TEST SHEET": the layout exists.
 - **LINE with one answer:** cancelled at "Specify first point:" and undone; no line left; CMDACTIVE 0 at the end.
 
+## Results: through the installed 0.1.7 bundle (same evening, 9 of 9 checks)
+Alex installed `autocad-mcp-0.1.7.mcpb` and restarted Claude. Calls went through Claude's own MCP connection (Microsoft Store build of Claude), in scratch drawings Drawing19 and Drawing20, closed without saving.
+- **-HATCH** solid on one rectangle, then on two nested rectangles ("2 found"): completed, 4 messages each; one hatch in the drawing.
+- **CHPROP** true colour `0,194,184` on `{"last": true}`: completed. `get_entity` then reports the hatch's colour as index 132, the nearest index colour: the tool does not report true colour.
+- **EXPLODE** of a title block panel inserted from its file: completed with the handle as the only answer, and the drawing then held the panel's 11 attribute definitions. With a second answer (`""`) it "ended before answer 2 of 2" and was undone: `(command "_.EXPLODE" ent)` takes one object and ends.
+- **-LAYOUT** Rename `Layout1` to "ANSI B", and New "ARCH D": both layouts listed by `list_layouts`.
+- **LINE with one answer:** cancelled at "Specify first point:" and undone.
+- So the transcript folder under the user's home folder is visible to both sides from inside the Store build: **verified**.
+
 ## Not covered
-- The fix through the installed extension (it needs a new bundle), where the server may see a private `%LOCALAPPDATA%`. The transcript folder moved to `%USERPROFILE%\.autocad-mcp\run` for that reason; **not verified** from inside the Store build.
 - The Block Editor tools built on `run_command` (`tests/live/command_check.py` has still not run).
 - AutoCAD 2026, and AutoCAD as the foreground window.
 - Whether the 999-character limit is the same on other versions.
