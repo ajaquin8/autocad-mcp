@@ -17,6 +17,10 @@ def add_dimension(first: Point, second: Point, text_position: Point, kind: str =
                   rotation: float = 0, text_override: str = "", layer: str = "", name: str = "") -> dict:
     """Add a linear dimension between two points, using the current dimension style.
 
+    When the text does not fit between the extension lines, AutoCAD puts it outside, beyond
+    the second point. For a short dimension in a chain, give the two points in the order that
+    sends the text to free space.
+
     Args:
         first, second: the two points being measured [x, y].
         text_position: a point on the dimension line, where the text goes [x, y].

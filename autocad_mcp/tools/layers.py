@@ -66,7 +66,7 @@ def list_layers(name: str = "") -> list:
 
 @acad_tool()
 def add_layer(layer: str, color: int = 7, linetype: str = "Continuous", lineweight: int = -3,
-              description: str = "", name: str = "") -> dict:
+              description: str = "", plot: bool | None = None, name: str = "") -> dict:
     """Create a layer, or update the color/linetype/lineweight of an existing one.
 
     Args:
@@ -75,6 +75,8 @@ def add_layer(layer: str, color: int = 7, linetype: str = "Continuous", lineweig
         linetype: e.g. Continuous, HIDDEN, CENTER, DASHED (loaded from acad(iso).lin if needed).
         lineweight: hundredths of a mm, e.g. 25 for 0.25 mm; -3 is Default.
         description: layer description.
+        plot: False makes it a non-plotting layer (viewport frames, construction lines), True a
+            plotting one; leave it out to keep an existing layer as it is.
         name: which open drawing (default: active).
     """
     if not 1 <= color <= 255:
@@ -88,10 +90,11 @@ def add_layer(layer: str, color: int = 7, linetype: str = "Continuous", lineweig
             target = change.add(doc.Layers.Add(layer))
         else:
             target = existing
-            old = (target.color, str(target.Linetype), int(target.Lineweight), str(target.Description))
+            old = (target.color, str(target.Linetype), int(target.Lineweight), str(target.Description),
+                   bool(target.Plottable))
 
             def restore(t=target, o=old) -> None:
-                t.color, t.Linetype, t.Lineweight, t.Description = o
+                t.color, t.Linetype, t.Lineweight, t.Description, t.Plottable = o
             change.on_rollback(restore)
         ensure_linetype(doc, linetype)
         target.color = color
@@ -99,6 +102,8 @@ def add_layer(layer: str, color: int = 7, linetype: str = "Continuous", lineweig
         target.Lineweight = lineweight
         if description:
             target.Description = description
+        if plot is not None:
+            target.Plottable = bool(plot)
         result = describe_layer(target, str(doc.ActiveLayer.Name))
     result["created"] = existing is None
     return result

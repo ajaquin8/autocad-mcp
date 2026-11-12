@@ -12,10 +12,10 @@ from typing import Any
 import pywintypes
 
 from ..app import acad_tool
-from ..com import AcadError, point, rad, rounded
+from ..com import AcadError, enums, point, rad, rounded
 from ..session import session
 from .draw import Point, place
-from .entities import attributes, by_handle
+from .entities import attributes, by_handle, find_layout
 
 # Not real block properties: "Origin" is the base point AutoCAD lists for every dynamic block.
 INTERNAL_PROPERTIES = {"origin"}
@@ -183,7 +183,8 @@ def list_blocks(include_anonymous: bool = False, name: str = "") -> list:
 @acad_tool()
 def insert_block(block: str, position: Point, scale: float = 1, rotation: float = 0,
                  attribute_values: dict[str, str] | None = None, layer: str = "",
-                 dynamic_properties: dict[str, str | float] | None = None, name: str = "") -> dict:
+                 dynamic_properties: dict[str, str | float] | None = None, layout: str = "",
+                 name: str = "") -> dict:
     """Insert a block reference, optionally filling in its attributes and dynamic properties.
     For a dynamic block, "bbox" is what the block shows at its current size (measured from a
     temporary exploded copy, attribute text left out); AutoCAD's own box also counts hidden sizes.
@@ -198,6 +199,8 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
         layer: layer to put it on (default: current layer).
         dynamic_properties: for a dynamic block, values by property name, set in this order,
             e.g. {"Size": "#10-16", "Length": "1 1/4"} (see set_block_properties).
+        layout: a sheet's layout name, to insert into its paper space instead of model space,
+            e.g. a title block at [0, 0] (see list_layouts).
         name: which open drawing (default: active).
     """
     if scale == 0:
@@ -211,9 +214,10 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
             doc.Blocks.Item(block)
         except pywintypes.com_error:
             raise AcadError(f"No block named '{block}' in '{doc.Name}'. Use list_blocks.") from None
+    sheet = find_layout(doc, layout) if layout else None
+    space = sheet.Block if sheet is not None else doc.ModelSpace
     with session.edit(doc) as change:
-        ref = doc.ModelSpace.InsertBlock(point(position), block, float(scale), float(scale), float(scale),
-                                         rad(rotation))
+        ref = space.InsertBlock(point(position), block, float(scale), float(scale), float(scale), rad(rotation))
         change.add(ref)
         missing = set_attributes(ref, attribute_values or {}, change)
         if missing:
@@ -232,6 +236,8 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
         if dynamic_properties:
             info["dynamic_properties"] = {p["name"]: p["value"] for p in map(property_info, block_props(ref).values())
                                           if p["shown"]}
+        if sheet is not None:
+            info["layout"] = str(sheet.Name)
         return info
 
 
@@ -354,3 +360,42 @@ def measure_block(handle: str, include_geometry: bool = False, name: str = "") -
                 if len(geometry) > MAX_GEOMETRY:
                     result["geometry_truncated"] = len(geometry)
             return result
+
+
+@acad_tool()
+def add_attribute_definition(tag: str, position: Point, height: float, prompt: str = "", default: str = "",
+                             invisible: bool = False, constant: bool = False, preset: bool = False,
+                             lock_position: bool = True, layer: str = "", name: str = "") -> dict:
+    """Add an attribute definition (ATTDEF) in model space: a fill-in field such as a sheet
+    number or a part mark. Use it while drawing a block in its own drawing: save that drawing,
+    insert it by path with insert_block, and the block has these attributes to fill in.
+
+    Args:
+        tag: the attribute's name, e.g. "SHEET" (no spaces or "!"; stored in upper case).
+        position: where the text starts [x, y] (its left end, on the baseline).
+        height: text height in drawing units.
+        prompt: the question AutoCAD asks when the block is inserted by hand (default: the tag).
+        default: the value a new block starts with.
+        invisible: the value is stored but not drawn.
+        constant: the value is the same for every block and cannot be filled in.
+        preset: a block inserted by hand takes the default value without asking.
+        lock_position: the text cannot be dragged away inside the block (default True; the
+            Block Editor's actions need it too).
+        layer: layer to put it on (default: current layer).
+        name: which open drawing (default: active).
+    """
+    label = tag.strip().upper()  # over COM AutoCAD keeps the case as given (verified 2026-11-10)
+    if not label or any(c in label for c in " !"):
+        raise AcadError("tag must be a name without spaces or '!', e.g. SHEET or DRAWN_BY.")
+    if height <= 0:
+        raise AcadError("height must be positive.")
+    flags = (("acAttributeModeInvisible", invisible), ("acAttributeModeConstant", constant),
+             ("acAttributeModePreset", preset), ("acAttributeModeLockPosition", lock_position))
+    mode = sum(getattr(enums, flag) for flag, on in flags if on)
+    doc = session.document(name)
+    with session.edit(doc) as change:
+        att = doc.ModelSpace.AddAttribute(float(height), mode, prompt or label, point(position), label, default)
+        info = place(change, att, layer)
+        info.update(tag=str(att.TagString), prompt=str(att.PromptString), default=str(att.TextString),
+                    height=float(att.Height))
+        return info

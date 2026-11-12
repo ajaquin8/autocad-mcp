@@ -220,3 +220,52 @@ Writer: Claude Code side session.
 Writer: Claude Code (Alex: "Want to draw a cool tiny house…", then "lets do it" and "Restarted, go").
 - New: [[Sources/2026-11-08 Tiny house drawing]] (AMCP-LIVE-20261108-01). Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
 - No code changed. The drawing is in `scratch/` (not in git).
+
+## 2026-11-10: template tools without the command line
+Writer: Claude, in a Claude desktop session building a steel-detailing drawing template (Alex: "please proceed with option 1"). Branch `feat/template-tools`, not pushed.
+- Why: building a drawing template through the installed extension on AutoCAD 2027 (2026-11-09) needed text, dimension and multileader styles, a paper size, a non-plotting layer and a title block on a sheet. None of these had a tool, and `run_command` did not work there. That is **observed** in ordinary use, not a test batch: the expression never started, no transcript file appeared, and AutoCAD showed a Help dialog after the tool's fallback Enter. The cause is **unresolved**.
+- New tools, all plain ActiveX inside `session.edit` (edit guard, busy guard, one undo step, rollback):
+  - `tools/settings.py`: `add_text_style` (`TextStyles.Add`, `FontFile`, height, width factor, oblique angle); `add_dimension_style` (`DimStyles.Add`, then `CopyFrom` the document; takes DIM* variables, a text style and an arrowhead; the style becomes current); `add_multileader_style` (an `AcDbMLeaderStyle` in the `ACAD_MLEADERSTYLE` dictionary; `ScaleFactor`, text height, arrow size, text style).
+  - `tools/sheets.py`: `set_page_setup` (plot device, paper size by the name Page Setup shows, plot style table; the layout is plotted 1:1 without rotation).
+  - `tools/blocks.py`: `add_attribute_definition` (`ModelSpace.AddAttribute`, position locked by default).
+- Changed tools:
+  - `insert_block` takes `layout` and then inserts into that sheet's paper space; without it, model space as before.
+  - `add_layer` takes `plot`, the layer's plot flag.
+  - `set_drawing_variables` also takes DIMTAD, DIMTIH, DIMTOH, DIMFRAC, DIMEXO, DIMEXE and DIMGAP. Its validation and its dimension rebuild moved into `checked()` and `rebuild_dimensions()`, which `add_dimension_style` shares.
+- Version 0.1.4. Updated: README Tools, the server instructions, [[Projects/AutoCAD-MCP/Roadmap]], [[Projects/AutoCAD-MCP/index]], the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (54 tools).
+- Sources: AutoCAD 2027 ActiveX Reference Guide (help.autodesk.com, read 2026-11-10) for `TextStyle.FontFile`, `DimStyle.CopyFrom`, the `MLeaderStyle` object, the `Layout` plot members and `AddAttribute`; the DIMBLK system variable page for the arrowhead names.
+- Tests: 12 new offline tests (113 in total); `scripts\check.ps1` passes. **Not live-verified:** none of the new COM calls has run against AutoCAD. To check live:
+  - a TrueType file name (`arial.ttf`) in `FontFile`;
+  - DIMTIH and DIMTOH as 0/1 through `SetVariable`;
+  - a `DIMBLK` name before that arrowhead block exists in the drawing;
+  - an empty attribute default;
+  - `InsertBlock` on the block of a layout that is not the current tab;
+  - the paper names each plot device lists, and whether a new multileader style needs more than the four sizes copied from the current one.
+
+## 2026-11-10: template tools, first live run and fixes
+Writer: Claude, same session (Alex: "Lets go!" for the batch; after its first failure, "keep pushing and keep testing as we build"). Branch `feat/template-tools`, not pushed.
+- New: [[Sources/2026-11-10 Template tools]] (AMCP-LIVE-20261110-01). The 0.1.4 bundle was installed in Claude desktop and the tools were called through Claude's MCP connection on AutoCAD 2027: 14 of 15 checks.
+- Fixes from it:
+  - `add_text_style`: a TrueType file given by name is looked up in the Windows Fonts folders and passed as a full path, because AutoCAD refused `arial.ttf` by name. A refused font now gets a plain message (the refusal is an `AttributeError`).
+  - `add_attribute_definition`: the tool makes the tag upper case, because AutoCAD kept `title` as typed.
+  - `add_dimension`: its description says where the text goes when it does not fit.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]] (two new sections, one on `run_command` as observed through the extension), [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- Tests: 2 new offline tests (115 in total); `scripts\check.ps1` passes. The fixes themselves are **not live-verified**, because the installed bundle predates them; the full-path font route they rely on is.
+- Version 0.1.5, so the fixed bundle can be told apart from the 0.1.4 that was installed for the live run.
+- Deviation from [[Decisions/Live test protocol]]: the batch's title-block drawing and its PDF went to the Windows Temp folder, not `scratch/`, and were deleted afterwards.
+
+## 2026-11-11: template tools, second live run and fixes
+Writer: Claude, same session (Alex, after installing 0.1.5: "want to test it now and then I will merge after"). Branch `feat/template-tools`.
+- New: [[Sources/2026-11-11 Template tools second run]] (AMCP-LIVE-20261111-01), on AutoCAD 2027 through Claude's MCP connection: 11 of 13 checks. The three 0.1.5 fixes work live, and so does changing existing styles.
+- Fixes from it:
+  - `add_multileader_style`: a new style now gets a text style (the current multileader style's, else the current text style). Made without one, it had none at all and the tool failed reading it back.
+  - `set_page_setup`: a failed call on a layout never set up no longer reports an incomplete rollback; the empty paper name is not put back, because AutoCAD refuses it.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- Tests: 2 new offline tests (117 in total); `scripts\check.ps1` passes. Version 0.1.6. These two fixes are **not live-verified**.
+- One step used a short COM script instead of the server, on the scratch drawing only, to find which layout property could not be put back.
+
+## 2026-11-11: the 0.1.6 fixes, checked live
+Writer: Claude, same session (Alex installed the 0.1.6 bundle: "Okay its installed"). Branch `feat/template-tools`.
+- New: [[Sources/2026-11-11 Template tools third run]] (AMCP-LIVE-20261111-02), on AutoCAD 2027 through Claude's MCP connection: 3 of 3 checks. Both 0.1.6 fixes work live. This **supersedes** "not live-verified" in the entry above.
+- Updated: [[Sources/index]], [[Sources/2026-11-11 Template tools second run]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
+- No code change.
