@@ -7,7 +7,7 @@ from ..com import AcadError, enums, point, xyz
 from ..session import session
 from .draw import Point, place
 from .entities import find_layout
-from .plot import PDF_DEVICE
+from .plot import best_pdf_device
 
 
 @acad_tool(read_only=True)
@@ -118,7 +118,8 @@ def describe_page_setup(sheet) -> dict:
 
 
 @acad_tool()
-def set_page_setup(layout: str, paper: str, plot_style: str = "", device: str = PDF_DEVICE, name: str = "") -> dict:
+def set_page_setup(layout: str, paper: str, plot_style: str = "", device: str = "", name: str = "",
+                   plot_device: str = "") -> dict:
     """Set a sheet's page setup: plot device, paper size and, if given, the plot style table.
     The sheet then plots its whole layout at 1:1 without rotation, so pick the paper whose first
     number is the width: "ANSI full bleed B (17.00 x 11.00 Inches)" is a landscape 17 x 11
@@ -131,8 +132,12 @@ def set_page_setup(layout: str, paper: str, plot_style: str = "", device: str = 
             several fit, the error lists them.
         plot_style: a plot style table, e.g. "monochrome.ctb" for black lines ("" keeps the
             sheet's current one).
-        device: the plot device (default "DWG To PDF.pc3", the one plot_pdf uses).
+        device: older name for plot_device. Some MCP hosts do not pass on an argument called
+            "device", so use plot_device.
         name: which open drawing (default: active).
+        plot_device: the plot device, e.g. "AutoCAD PDF (High Quality Print).pc3". Default: the
+            best PDF driver this AutoCAD has, which is that one (2400 dpi vectors), else
+            "DWG To PDF.pc3" (600 dpi). plot_pdf plots with the sheet's PDF driver.
     """
     doc = session.document(name)
     sheet = find_layout(doc, layout)
@@ -151,7 +156,9 @@ def set_page_setup(layout: str, paper: str, plot_style: str = "", device: str = 
                     setattr(sheet, prop, value)
         change.on_rollback(restore)
         sheet.RefreshPlotDeviceInfo()
-        sheet.ConfigName = match_one(device, _strings(sheet.GetPlotDeviceNames()), "plot device")
+        devices = _strings(sheet.GetPlotDeviceNames())
+        wanted = plot_device or device
+        sheet.ConfigName = match_one(wanted, devices, "plot device") if wanted else best_pdf_device(devices)
         sheet.RefreshPlotDeviceInfo()  # the paper sizes are the new device's
         canonical = _strings(sheet.GetCanonicalMediaNames())
         shown = {str(sheet.GetLocaleMediaName(c)): c for c in canonical}

@@ -64,7 +64,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 ## Plot
 
-- **`plot_pdf`** (read-only): Plot one layout to a PDF with its own page setup, using the DWG To PDF device. No geometry is changed and the layout tab the user had open is restored, but AutoCAD marks the drawing as having unsaved changes after a plot (verified 2026-10-29). Parameters: `path`, `layout`, `overwrite`, `name`.
+- **`plot_pdf`** (read-only): Plot one layout to a PDF with its own page setup. The PDF driver is the one in the sheet's page setup if that is a PDF driver (see set_page_setup), else "DWG To PDF.pc3". No geometry is changed and the layout tab the user had open is restored, but AutoCAD marks the drawing as having unsaved changes after a plot (verified 2026-10-29). Parameters: `path`, `layout`, `overwrite`, `name`, `plot_device`.
 
 ## Drawing settings
 
@@ -79,7 +79,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 - **`list_layouts`** (read-only): List the drawing's sheets (layouts) in tab order, with the viewports and block references (such as the title block) on each. Use the handles with get_entity and set_block_attributes. Parameters: `name`.
 - **`add_viewport`**: Add a viewport to a sheet (layout) that shows model space at an exact scale, centred on a model point. The sheet becomes the current layout tab. One undo step. Parameters: `layout`, `corner`, `opposite_corner`, `view_center`, `scale`, `layer`, `lock`, `name`.
-- **`set_page_setup`**: Set a sheet's page setup: plot device, paper size and, if given, the plot style table. The sheet then plots its whole layout at 1:1 without rotation, so pick the paper whose first number is the width: "ANSI full bleed B (17.00 x 11.00 Inches)" is a landscape 17 x 11 sheet. One undo step. Parameters: `layout`, `paper`, `plot_style`, `device`, `name`.
+- **`set_page_setup`**: Set a sheet's page setup: plot device, paper size and, if given, the plot style table. The sheet then plots its whole layout at 1:1 without rotation, so pick the paper whose first number is the width: "ANSI full bleed B (17.00 x 11.00 Inches)" is a landscape 17 x 11 sheet. One undo step. Parameters: `layout`, `paper`, `plot_style`, `device`, `name`, `plot_device`.
 
 ## block_editor
 

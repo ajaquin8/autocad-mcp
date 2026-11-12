@@ -30,6 +30,7 @@ from autocad_mcp.tools import (
     edit,
     entities,
     layers,
+    plot,
     query,
     settings,
     sheets,
@@ -1453,6 +1454,26 @@ def test_add_layer_sets_the_plot_flag_only_when_asked(fake_app):
     assert layers.add_layer("S-ANNO-NPLT", color=9, plot=False)["plottable"] is False
     assert layers.add_layer("S-ANNO-NPLT", color=9)["plottable"] is False  # left as it is
     assert layers.add_layer("S-ANNO-NPLT", color=9, plot=True)["plottable"] is True
+
+
+def test_page_setup_takes_the_best_pdf_driver_unless_one_is_named(fake_app, monkeypatch):
+    # The legacy driver writes 600 dpi vectors; High Quality Print 2400 (measured live 2026-11-12).
+    session.mark_owned(fake_app.doc)
+    sheet = fake_app.doc.Layouts.Item(0)
+    names = ("None", "Microsoft Print to PDF", "AutoCAD PDF (General Documentation).pc3",
+             "AutoCAD PDF (High Quality Print).pc3", "DWG To PDF.pc3")
+    monkeypatch.setattr(type(sheet), "GetPlotDeviceNames", lambda self: names)
+    paper = "ANSI full bleed B (17.00 x 11.00 Inches)"
+    assert sheets.set_page_setup("Sheet1", paper)["device"] == "AutoCAD PDF (High Quality Print).pc3"
+    assert sheets.set_page_setup("Sheet1", paper, plot_device="general documentation")["device"] == \
+        "AutoCAD PDF (General Documentation).pc3"
+    assert sheets.set_page_setup("Sheet1", paper, device="DWG To PDF.pc3")["device"] == "DWG To PDF.pc3"  # old name
+    with pytest.raises(AcadError, match="No plot device matches 'plotter'"):
+        sheets.set_page_setup("Sheet1", paper, plot_device="plotter")
+    assert plot.best_pdf_device(["None", "DWG To PDF.pc3"]) == "DWG To PDF.pc3"
+    assert plot.best_pdf_device([]) == "DWG To PDF.pc3"
+    assert plot.is_pdf_device("AutoCAD PDF (Smallest File).pc3") and plot.is_pdf_device("dwg to pdf.pc3")
+    assert not plot.is_pdf_device("Microsoft Print to PDF") and not plot.is_pdf_device("None")
 
 
 def test_page_setup_picks_one_paper_and_plots_the_layout_at_full_size(fake_app):

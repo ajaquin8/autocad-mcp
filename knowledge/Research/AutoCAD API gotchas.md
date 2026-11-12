@@ -169,3 +169,8 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **verified:** never send a bare Enter as a fallback. With nothing typed it repeats AutoCAD's last command (the Help dialog of 2026-11-10).
 - **observed:** one expression typed across several messages is unreliable (1 of 6 tries cut between forms). **verified:** several short complete expressions, each with its Enter, are reliable: store the long text in a variable piece by piece, then `(eval (read ...))` it (22 of 22 checks).
 - **verified:** `-HATCH` with `_P _S`, then `_S`, a selection and two Enters hatches selected closed polylines and leaves nested ones as islands. `CHPROP` with `_C _T "r,g,b"` sets a true colour.
+
+## 2026-11-12: plotting to PDF ([[Sources/2026-11-12 PDF plot device]])
+- **verified:** the PDF's vector grid is set by the driver: `DWG To PDF.pc3` 600 per inch, `AutoCAD PDF (General Documentation).pc3` 1200, `AutoCAD PDF (High Quality Print).pc3` 2400. `PlotToFile(path)` without a device uses the layout's driver.
+- **verified:** a solid hatch reaches the PDF as triangle pairs, each filled and stroked with a zero-width line. The strokes hide seams between the triangles but are drawn one pixel wide and not anti-aliased, so small solid fills (a logo) have hard, stepped edges on screen at any driver resolution. Text in a TrueType font is written as real glyphs and stays sharp.
+- **inferred:** an MCP host can drop a tool argument called `device`. `set_page_setup` and `plot_pdf` take `plot_device`.
