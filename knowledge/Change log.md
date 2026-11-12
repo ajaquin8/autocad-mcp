@@ -269,3 +269,21 @@ Writer: Claude, same session (Alex installed the 0.1.6 bundle: "Okay its install
 - New: [[Sources/2026-11-11 Template tools third run]] (AMCP-LIVE-20261111-02), on AutoCAD 2027 through Claude's MCP connection: 3 of 3 checks. Both 0.1.6 fixes work live. This **supersedes** "not live-verified" in the entry above.
 - Updated: [[Sources/index]], [[Sources/2026-11-11 Template tools second run]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/index]], [[Projects/AutoCAD-MCP/Roadmap]].
 - No code change.
+
+## 2026-11-11: run_command starts (input limit found, expression sent in short messages)
+Writer: Claude, in a Claude desktop session, on Alex's go ("Yes"). Branch `fix/run-command-input-limit` (from `feat/template-tools`). Version 0.1.7.
+- New: [[Sources/2026-11-11 run_command input limit]] (AMCP-LIVE-20261111-03 and -04). AutoCAD drops a WM_COPYDATA message of 1000 characters or more without a word, and evaluates nothing until Enter. `run_command` sent about 1,350 characters and no Enter, so it never started.
+- Code (`tools/commands.py`):
+  - The expression goes to AutoCAD as short complete expressions, each with its Enter (`staged_messages`): pieces of its text stored in `amcp:src`, each acknowledged by an `S` line in the transcript, then `(eval (read amcp:src))`.
+  - No fallback Enter any more. If a message is not taken within 3 s, the server cancels what was typed and says which message it was.
+  - The transcript folder is `%USERPROFILE%\.autocad-mcp\run` (`AMCP_RUN_DIR` overrides it), because the Store build of Claude gives the server a private `%LOCALAPPDATA%`.
+  - The result has `messages` (how many were sent) in place of `needed_enter`.
+- Tests: the fake command line follows the new protocol; 2 tests replaced, 1 added. `ruff` and the offline tests pass.
+- Live: 22 of 22 checks with the repo code (hatch with an island, true colour, 25 answers, new layout, cancel and undo). **Not verified** through the installed extension, which is still 0.1.6.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], [[Projects/AutoCAD-MCP/Roadmap]].
+
+## 2026-11-11: run_command checked through the installed 0.1.7 bundle
+Writer: Claude, same session (Alex installed the bundle and restarted Claude). Branch `fix/run-command-input-limit`.
+- [[Sources/2026-11-11 run_command input limit]] gained a section: 9 of 9 checks through Claude's own MCP connection (hatch, true colour, explode, layout rename and new, cancel and undo). This **supersedes** "not verified through the installed extension" in the entry above.
+- Found: `get_entity` reports a true colour as its nearest index colour; EXPLODE takes one object and no closing Enter.
+- No code change.

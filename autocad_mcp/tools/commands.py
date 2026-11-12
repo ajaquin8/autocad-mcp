@@ -16,6 +16,21 @@ expression:
   mark it set first if the command ended early or had to be cancelled;
 - writes that transcript to a file the server reads, so nothing needs COM while it runs.
 Running object snaps are off while it runs, and CMDECHO is on so the prompts are logged.
+
+How the expression is handed over (live 2026-11-11, AutoCAD 2027, scratch/AMCP-DIAG-20261111-*):
+- AutoCAD does NOT evaluate input when the parentheses close. It sits on the command line as
+  typed text, and AutoCAD rejects COM calls meanwhile, until an Enter arrives. So every message
+  ends with its Enter.
+- One WM_COPYDATA message carries at most 999 characters including the Enter (998 + Enter ran,
+  999 + Enter did not). A longer message is dropped whole and nothing says so: this is why
+  run_command never started before (the shortest expression is about 1,350 characters).
+- Typing one expression across several messages is not reliable: of six tries cut between
+  forms, one ran. So the expression is not typed in pieces. Each message is a complete, short
+  expression of its own: the first ones store the big expression's text in a variable, piece
+  by piece, and each writes an "S" line to the transcript so the server knows AutoCAD took it
+  before sending the next; the last one evaluates the stored text.
+- The transcript folder is under the user's home folder, not %LOCALAPPDATA%: the Microsoft Store
+  build of Claude gives the server a private copy of %LOCALAPPDATA% that AutoCAD cannot see.
 """
 
 from __future__ import annotations
@@ -37,9 +52,11 @@ from ..session import doc_key, is_busy_error, session
 from ..winui import describe_blockers, send_input, window_title
 from .control import CANCEL_INPUT
 
-RUN_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "run"
+# A folder both this server and AutoCAD see (see the module docstring); AMCP_RUN_DIR overrides it.
+RUN_DIR = Path(os.environ.get("AMCP_RUN_DIR") or Path.home() / ".autocad-mcp" / "run")
 START_WAIT = 3.0  # seconds for the expression to start (it first creates the transcript file)
-POLL = 0.1
+MAX_MESSAGE = 900  # characters per WM_COPYDATA message; AutoCAD drops a message of 1000 or more
+POLL = 0.05
 MAX_INPUTS = 60
 MAX_TEXT = 256
 
@@ -160,14 +177,14 @@ def check_inputs(inputs: Sequence[Any]) -> list[str]:
 
 
 def build_lisp(command: str, inputs: Sequence[Any], transcript: str, undo: bool) -> str:
-    """The single expression run_command hands to AutoCAD. No trailing space or line break: AutoCAD
-    evaluates it when the parentheses close, and an extra Enter would repeat the last command."""
+    """The single expression that runs the command (no trailing space or line break). It appends to
+    the transcript, which the messages that carried it to AutoCAD have already started."""
     answers = check_inputs(inputs)
     names = "'(" + " ".join(lisp_string(v) for v in SAVED_VARS) + ")"
     path = lisp_string(transcript.replace("\\", "/"))
     parts = [
         "(progn",
-        f"(setq amcp:f (open {path} \"w\"))",
+        f"(setq amcp:f (open {path} \"a\"))",
         f"(setq amcp:sv (mapcar 'getvar {names}) amcp:olderr *error* amcp:ok T amcp:early nil amcp:act nil"
         " amcp:mark nil)",
         "(defun amcp:log (tag text) (if amcp:f (write-line (strcat tag \"\\t\" text) amcp:f)))",
@@ -199,6 +216,36 @@ def build_lisp(command: str, inputs: Sequence[Any], transcript: str, undo: bool)
         "(princ))",
     ]
     return " ".join(parts)
+
+
+def staged_messages(lisp: str, transcript: str, limit: int = MAX_MESSAGE) -> list[tuple[str, str]]:
+    """What is sent to AutoCAD, in order, as (message, the transcript line that shows AutoCAD ran it).
+
+    Every message is a complete expression ending with Enter, and at most `limit` characters. The
+    first ones store `lisp` as text in amcp:src, a piece each, and write "S<tab>n" to the transcript;
+    the last evaluates the stored text, whose own first line is "B". See the module docstring for why.
+    """
+    path = lisp_string(transcript.replace("\\", "/"))
+
+    def wrap(index: int, piece: str) -> str:
+        store = f"(setq amcp:src (strcat amcp:src {piece}))" if index else f"(setq amcp:src {piece})"
+        mode = "a" if index else "w"
+        return (f"(progn {store} (setq amcp:h (open {path} \"{mode}\")) (write-line \"S\\t{index}\" amcp:h) "
+                "(close amcp:h) (princ))\n")
+
+    room = limit - len(wrap(999, '""'))
+    if room < 100:
+        raise AcadError(f"The transcript path is too long to hand the command to AutoCAD: {transcript}")
+    messages: list[tuple[str, str]] = []
+    piece = ""
+    for char in lisp:
+        if len(lisp_string(piece + char)) - 2 > room:
+            messages.append((wrap(len(messages), lisp_string(piece)), f"S\t{len(messages)}"))
+            piece = ""
+        piece += char
+    messages.append((wrap(len(messages), lisp_string(piece)), f"S\t{len(messages)}"))
+    messages.append(("(eval (read amcp:src))\n", "B\t"))
+    return messages
 
 
 def describe_input(value: Any) -> str:
@@ -275,15 +322,13 @@ def _read(path: Path) -> str:
         return data.decode("mbcs", errors="replace")
 
 
-def _wait_for(path: Path, seconds: float, done: bool) -> bool:
-    """Wait until the transcript exists (done=False) or is finished (done=True)."""
+def _wait_line(path: Path, prefix: str, seconds: float) -> bool:
+    """Wait until the transcript has a line that starts with `prefix`."""
     deadline = time.monotonic() + seconds
     while True:
         if path.exists():
-            if not done:
-                return True
             with contextlib.suppress(OSError):
-                if any(line.startswith("D\t") for line in _read(path).splitlines()):
+                if any(line.startswith(prefix) for line in _read(path).splitlines()):
                     return True
         if time.monotonic() > deadline:
             return False
@@ -321,18 +366,18 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
 
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     path = RUN_DIR / f"run-{uuid.uuid4().hex}.txt"
-    lisp = build_lisp(sent, inputs, str(path), undo)
+    messages = staged_messages(build_lisp(sent, inputs, str(path), undo), str(path))
     timeout_seconds = max(1.0, min(float(timeout_seconds), 150.0))
-    needed_enter = False
     try:
-        send_input(hwnd, lisp)  # a False here may only mean AutoCAD is still evaluating: the file tells
-        if not _wait_for(path, START_WAIT, done=False):
-            needed_enter = True  # the expression did not start: AutoCAD may want Enter after it
-            send_input(hwnd, "\n")
-            if not _wait_for(path, START_WAIT, done=False):
-                raise AcadError("AutoCAD did not run the command expression (nothing happened within "
-                                f"{2 * START_WAIT:.0f}s)." + describe_blockers(hwnd))
-        if not _wait_for(path, timeout_seconds, done=True):
+        for i, (message, shows) in enumerate(messages, start=1):
+            send_input(hwnd, message)  # a False may only mean AutoCAD is busy evaluating: the transcript tells
+            if not _wait_line(path, shows, START_WAIT):
+                send_input(hwnd, CANCEL_INPUT)  # never leave anything typed on the command line
+                raise AcadError(f"AutoCAD did not run the command expression: it did not take message {i} of "
+                                f"{len(messages)} ({len(message)} characters) within {START_WAIT:.0f}s. Nothing "
+                                f"of the command ran; what was typed was cancelled. Transcript folder: {RUN_DIR}."
+                                + describe_blockers(hwnd))
+        if not _wait_line(path, "D\t", timeout_seconds):
             raise AcadError(f"'{sent}' did not finish within {timeout_seconds:.0f}s. It may be waiting in a dialog "
                             "or still working; do NOT repeat it. Check acad_status." + describe_blockers(hwnd))
         result = parse_transcript(_read(path), sent, inputs)
@@ -340,7 +385,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
         with contextlib.suppress(OSError):
             path.unlink()
     result["drawing"] = str(doc.Name)
-    result["needed_enter"] = needed_enter
+    result["messages"] = len(messages)
     result["undo_mark"] = undo
     # Safety net: the expression should never leave a command waiting; if one is, cancel it.
     with worker.quick_retries():

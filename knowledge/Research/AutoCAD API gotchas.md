@@ -161,3 +161,11 @@ All **reported** from the notes of the session that ran the batch (seen there in
 - **verified:** `Layout.CanonicalMediaName` is an empty string on a layout that was never set up, and AutoCAD refuses to be given the empty string back ("Invalid input"). After `ConfigName` is put back, such a layout takes that device's default paper.
 - **verified:** changing a text style's `FontFile` changes text already drawn in it after a regen. Changing a multileader style's `ScaleFactor` resizes leaders already drawn in it. Dimensions follow a changed dimension style once each is updated (as noted on 2026-10-29).
 - **observed:** the layouts of a new drawing had the PC's default Windows printer as their plot device that day. Which device a new drawing gets is AutoCAD's own setting, so `set_page_setup` should not assume one.
+
+## 2026-11-11: command-line input through WM_COPYDATA ([[Sources/2026-11-11 run_command input limit]])
+This answers the first two open questions of 2026-11-06 and the "unresolved" of 2026-11-10 above.
+- **verified:** AutoCAD does not evaluate an AutoLISP expression when its parentheses close. It stays on the command line as typed text, and AutoCAD rejects COM calls until an Enter or a cancel arrives. Put `\n` at the end of the same message.
+- **verified:** one message carries at most 999 characters including the Enter. A longer one is dropped whole, silently: `SendMessageTimeout` reports success and nothing reaches the command line. This is why `run_command` never started: its shortest expression is about 1,350 characters.
+- **verified:** never send a bare Enter as a fallback. With nothing typed it repeats AutoCAD's last command (the Help dialog of 2026-11-10).
+- **observed:** one expression typed across several messages is unreliable (1 of 6 tries cut between forms). **verified:** several short complete expressions, each with its Enter, are reliable: store the long text in a variable piece by piece, then `(eval (read ...))` it (22 of 22 checks).
+- **verified:** `-HATCH` with `_P _S`, then `_S`, a selection and two Enters hatches selected closed polylines and leaves nested ones as islands. `CHPROP` with `_C _T "r,g,b"` sets a true colour.
