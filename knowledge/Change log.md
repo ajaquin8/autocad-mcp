@@ -215,3 +215,8 @@ Writer: Claude Code side session.
 - New live script `tests/live/command_check.py` (not run: it needs Alex's go).
 - Updated: README, [[Projects/AutoCAD-MCP/Roadmap]] item 3, the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (49 tools).
 - Tests: 8 new offline tests (101 in total). **Not live-verified**; inferred: a linear parameter's line runs through the label location (the pick point relies on it).
+
+## 2026-11-08: tiny house drawing (live)
+Writer: Claude Code (Alex: "Want to draw a cool tiny house…", then "lets do it" and "Restarted, go").
+- New: [[Sources/2026-11-08 Tiny house drawing]] (AMCP-LIVE-20261108-01). Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
+- No code changed. The drawing is in `scratch/` (not in git).
