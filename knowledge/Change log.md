@@ -216,6 +216,11 @@ Writer: Claude Code side session.
 - Updated: README, [[Projects/AutoCAD-MCP/Roadmap]] item 3, the regenerated [[Projects/AutoCAD-MCP/Tool reference]] (49 tools).
 - Tests: 8 new offline tests (101 in total). **Not live-verified**; inferred: a linear parameter's line runs through the label location (the pick point relies on it).
 
+## 2026-11-08: tiny house drawing (live)
+Writer: Claude Code (Alex: "Want to draw a cool tiny house…", then "lets do it" and "Restarted, go").
+- New: [[Sources/2026-11-08 Tiny house drawing]] (AMCP-LIVE-20261108-01). Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
+- No code changed. The drawing is in `scratch/` (not in git).
+
 ## 2026-11-10: template tools without the command line
 Writer: Claude, in a Claude desktop session building a steel-detailing drawing template (Alex: "please proceed with option 1"). Branch `feat/template-tools`, not pushed.
 - Why: building a drawing template through the installed extension on AutoCAD 2027 (2026-11-09) needed text, dimension and multileader styles, a paper size, a non-plotting layer and a title block on a sheet. None of these had a tool, and `run_command` did not work there. That is **observed** in ordinary use, not a test batch: the expression never started, no transcript file appeared, and AutoCAD showed a Help dialog after the tool's fallback Enter. The cause is **unresolved**.

@@ -134,6 +134,11 @@ All **reported** from the notes of the session that ran the batch (seen there in
 - **unresolved:** whether the window title changes in the Block Editor. `run_command` only checks that the title names the drawing.
 - **unresolved:** whether UNDO Mark / Back inside the Block Editor goes back only to the mark.
 
+## 2026-11-08: multileaders and dimension overrides (from [[Sources/2026-11-08 Tiny house drawing]])
+- **inferred (bounding box, not seen on screen):** in a drawing from the default template, `add_leader` uses the Standard multileader style at its own small text height; DIMSCALE does not scale multileaders. At 1/2" = 1'-0" the note is unreadable. Until a scaled style exists, use a polyline plus TEXT, or bring a multileader style in from a template and select it with `set_current_styles`.
+- **verified:** a dimension `text_override` takes the measured value as a plain `<>`. An HTML-escaped `&lt;&gt;` is shown literally.
+- **verified:** if the server files change while the MCP server is running, a traceback shows lines from the new files on disk while the old code runs. Restart Claude after switching branches or pulling.
+
 ## 2026-11-10: styles, page setup and attributes over ActiveX ([[Sources/2026-11-10 Template tools]])
 - **verified:** `TextStyle.FontFile` takes an AutoCAD font by name (`romans.shx`) but refuses a TrueType file by name (`arial.ttf`). The full path (`C:\Windows\Fonts\arial.ttf`) works and plots as Arial. Through late-bound pywin32 the refusal is an `AttributeError` ("Property 'Add.FontFile' can not be set"), not a `com_error`.
 - **verified:** DIMTIH and DIMTOH take 0/1 through `SetVariable`. `SetVariable("DIMBLK", "_ARCHTICK")` works before that arrowhead block exists in the drawing, and reads back as `ArchTick`.
