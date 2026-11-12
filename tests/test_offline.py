@@ -1002,20 +1002,26 @@ def test_command_names_are_checked():
 class _FakeAutoCAD:
     """Stands in for AutoCAD's command line: writes the transcript the expression would write."""
 
-    def __init__(self, lines, needs_enter=False, still_active=False, doc=None):
-        self.lines, self.needs_enter, self.still_active, self.doc = lines, needs_enter, still_active, doc
-        self.sent, self.path = [], None
+    def __init__(self, lines, never_starts=False, still_active=False, doc=None, drops=None):
+        self.lines, self.never_starts, self.still_active, self.doc = lines, never_starts, still_active, doc
+        self.sent, self.path, self.drops = [], None, drops
 
     def send(self, hwnd, text):
+        import re
         self.sent.append(text)
-        if text.startswith("(progn"):
-            import re
-            self.path = re.search(r'\(open "([^"]+)"', text)[1]
-            if self.needs_enter:
-                return True
-        elif text != "\n":
+        if text == "\x03\x03":
             return True  # the cancel
-        with open(self.path, "w", encoding="utf-8") as f:
+        stage = re.search(r'\(open "([^"]+)" "[wa]"\)\) \(write-line "S\\t(\d+)"', text)
+        if stage:  # a piece of the expression being stored: AutoCAD notes that it took it
+            self.path = stage[1]
+            if self.drops == int(stage[2]):
+                return True
+            with open(self.path, "a" if int(stage[2]) else "w", encoding="utf-8") as f:
+                f.write(f"S\t{stage[2]}\n")
+            return True
+        if self.never_starts:
+            return True
+        with open(self.path, "a", encoding="utf-8") as f:
             f.write("\n".join(self.lines) + "\n")
         if self.still_active:
             self.doc.variables["CMDACTIVE"] = 1
@@ -1045,7 +1051,8 @@ def test_run_command_returns_the_transcript(fake_app, command_line):
     out = json.loads(result.content[0].text)
     assert out["completed"] and out["problem"] is None and out["inputs_used"] == 2
     assert [s["sent"] for s in out["steps"]] == ["_.BPARAMETER", "_L", "[0, 0]"]
-    assert out["undo_mark"] and not out["needed_enter"] and len(fake.sent) == 1
+    assert out["undo_mark"] and out["messages"] == len(fake.sent) >= 3
+    assert fake.sent[-1] == "(eval (read amcp:src))\n" and all(m.endswith("\n") for m in fake.sent)
     assert not list(commands.RUN_DIR.iterdir())  # the transcript file is removed
 
 
@@ -1062,10 +1069,41 @@ def test_run_command_reports_an_early_end_and_a_cancel(fake_app, command_line):
     assert not out["completed"] and "found nothing" in out["problem"]
 
 
-def test_run_command_presses_enter_once_if_the_expression_did_not_start(fake_app, command_line):
-    fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t0"], needs_enter=True))
-    out = commands.run(fake_app.doc, "REGEN")
-    assert out["completed"] and out["needed_enter"] and fake.sent[1] == "\n"
+def _stored_text(messages):
+    """What AutoCAD would have in amcp:src after the storing messages (undoing the string escapes)."""
+    import re
+    out = []
+    for message, _ in messages[:-1]:
+        literal = re.search(r'\(setq amcp:src (?:\(strcat amcp:src )?"((?:[^"\\]|\\.)*)"', message)[1]
+        out.append(re.sub(r"\\(.)", r"\1", literal))
+    return "".join(out)
+
+
+def test_command_expression_reaches_autocad_in_short_complete_messages():
+    # AutoCAD drops a WM_COPYDATA message of 1000 characters or more, silently (live 2026-11-11).
+    answers = [f'answer "{i}" \\ ' + "x" * 60 for i in range(40)]
+    lisp = commands.build_lisp("_.-LAYER", answers, r"C:\Users\me\.autocad-mcp\run\t.txt", True)
+    messages = commands.staged_messages(lisp, r"C:\Users\me\.autocad-mcp\run\t.txt")
+    assert len(messages) > 5 and all(len(m) <= commands.MAX_MESSAGE and m.endswith("\n") for m, _ in messages)
+    assert all(_lisp_tokens(m[:-1])[0] == 0 for m, _ in messages)  # each one a complete expression
+    assert _stored_text(messages) == lisp
+    assert [shows for _, shows in messages] == [f"S\t{i}" for i in range(len(messages) - 1)] + ["B\t"]
+    assert messages[0][0].startswith('(progn (setq amcp:src "') and 't.txt" "w"))' in messages[0][0]
+    assert messages[1][0].startswith('(progn (setq amcp:src (strcat amcp:src "') and 't.txt" "a"))' in messages[1][0]
+    assert messages[-1][0] == "(eval (read amcp:src))\n"
+    with pytest.raises(AcadError, match="path is too long"):
+        commands.staged_messages(lisp, "C:/" + "d" * 800 + "/t.txt")
+
+
+def test_run_command_cancels_what_it_typed_if_the_expression_does_not_start(fake_app, command_line):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t0"], never_starts=True))
+    with pytest.raises(AcadError, match=r"did not take message (\d) of \1 "):
+        commands.run(fake_app.doc, "REGEN", undo_on_failure=False)
+    assert fake.sent[-1] == "\x03\x03" and "\n" not in fake.sent  # no bare Enter: it would repeat a command
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t0"], drops=1))  # AutoCAD does not take the second piece
+    with pytest.raises(AcadError, match="did not take message 2 of"):
+        commands.run(fake_app.doc, "REGEN")
+    assert len(fake.sent) == 3 and fake.sent[-1] == "\x03\x03"  # stopped there, nothing evaluated
 
 
 def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
@@ -1079,7 +1117,7 @@ def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypa
     monkeypatch.setattr(commands, "describe_blockers", lambda hwnd: ' AutoCAD shows the dialog "Block".')
     with pytest.raises(AcadError, match='did not finish.*do NOT repeat.*"Block"'):
         commands.run(fake_app.doc, "BCLOSE", timeout_seconds=1)
-    assert len(fake.sent) == 1
+    assert fake.sent.count("(eval (read amcp:src))\n") == 1  # sent once: nothing repeated
 
 
 def test_run_command_keeps_the_guards(fake_app, command_line, monkeypatch):
