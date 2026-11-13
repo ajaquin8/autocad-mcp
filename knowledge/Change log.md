@@ -287,3 +287,13 @@ Writer: Claude, same session (Alex installed the bundle and restarted Claude). B
 - [[Sources/2026-11-11 run_command input limit]] gained a section: 9 of 9 checks through Claude's own MCP connection (hatch, true colour, explode, layout rename and new, cancel and undo). This **supersedes** "not verified through the installed extension" in the entry above.
 - Found: `get_entity` reports a true colour as its nearest index colour; EXPLODE takes one object and no closing Enter.
 - No code change.
+
+## 2026-11-12: sheets plot with their own PDF driver; the best one is the default
+Writer: Claude, in a Claude desktop session, on Alex's go ("Lets do it"). Branch `feat/plot-device` (from `main` after PR #22).
+- New: [[Sources/2026-11-12 PDF plot device]] (AMCP-LIVE-20261112-01): the legacy driver writes 600 dpi vectors, High Quality Print 2400; `plot_pdf` ignored the sheet's driver; solid fills are written as hairline-stroked triangles, which is why they look rough on screen whatever the resolution.
+- Code:
+  - `plot_pdf` plots with the driver in the sheet's page setup when that is one of AutoCAD's PDF drivers, else `DWG To PDF.pc3`. New argument `plot_device` for one plot; the result names the `device` used.
+  - `set_page_setup` takes `plot_device`; with none named it picks `AutoCAD PDF (High Quality Print).pc3` if AutoCAD has it, else `DWG To PDF.pc3`. `device` still works as the older name.
+- Tests: 1 new offline test (119 in total); `scripts\check.ps1` passes. Live: 28 of 28 with the repo code. **Not verified** through an installed bundle.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], Tool reference.
+- 2026-11-13: version 0.1.8 in `pyproject.toml` and `app.py`, on Alex's go ("Okay lets push it"), so a bundle with this change can be told apart from the installed 0.1.7. Still **not verified** through an installed bundle.
