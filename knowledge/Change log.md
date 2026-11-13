@@ -296,3 +296,4 @@ Writer: Claude, in a Claude desktop session, on Alex's go ("Lets do it"). Branch
   - `set_page_setup` takes `plot_device`; with none named it picks `AutoCAD PDF (High Quality Print).pc3` if AutoCAD has it, else `DWG To PDF.pc3`. `device` still works as the older name.
 - Tests: 1 new offline test (119 in total); `scripts\check.ps1` passes. Live: 28 of 28 with the repo code. **Not verified** through an installed bundle.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], Tool reference.
+- 2026-11-13: version 0.1.8 in `pyproject.toml` and `app.py`, on Alex's go ("Okay lets push it"), so a bundle with this change can be told apart from the installed 0.1.7. Still **not verified** through an installed bundle.
