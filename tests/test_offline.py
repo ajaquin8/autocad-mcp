@@ -1369,6 +1369,22 @@ def test_linear_parameter_answers_in_the_live_order(fake_app, monkeypatch):
         block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6], grips=3)
 
 
+def test_linear_parameter_value_sets_follow_the_live_prompts(fake_app, monkeypatch):
+    # T7, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03): Value set comes before the start point.
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    block_editor.add_linear_parameter("Width", [0, 0], [60, 0], [30, -6], value_list=[48, 60, 72.5])
+    block_editor.add_linear_parameter("Height", [0, 0], [0, 84], [-6, 42], increment={"step": 6, "min": 72, "max": 96})
+    (_, listed, _), (_, stepped, _) = runs.calls
+    assert listed == ["_L", "_L", "Width", "_V", "_L", "48,60,72.5", [0, 0], [60, 0], [30, -6], "1"]
+    assert stepped == ["_L", "_L", "Height", "_V", "_I", 6.0, 72.0, 96.0, [0, 0], [0, 84], [-6, 42], "1"]
+    for bad in [{"value_list": [1], "increment": {"step": 1, "min": 0, "max": 2}},
+                {"increment": {"step": 0, "min": 0, "max": 2}}, {"increment": {"step": 1, "min": 3, "max": 2}},
+                {"increment": {"step": 1}}]:
+        with pytest.raises(ValueError):
+            block_editor.add_linear_parameter("W", [0, 0], [1, 0], [0, -1], **bad)
+    assert len(runs.calls) == 2  # nothing sent for the bad ones
+
+
 def test_linear_parameter_needs_the_editor_and_reports_failure(fake_app, monkeypatch):
     _editor(fake_app, monkeypatch, open_=False)
     with pytest.raises(AcadError, match="not open"):
