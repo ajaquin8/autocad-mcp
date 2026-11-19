@@ -174,3 +174,9 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **verified:** the PDF's vector grid is set by the driver: `DWG To PDF.pc3` 600 per inch, `AutoCAD PDF (General Documentation).pc3` 1200, `AutoCAD PDF (High Quality Print).pc3` 2400. `PlotToFile(path)` without a device uses the layout's driver.
 - **verified:** a solid hatch reaches the PDF as triangle pairs, each filled and stroked with a zero-width line. The strokes hide seams between the triangles but are drawn one pixel wide and not anti-aliased, so small solid fills (a logo) have hard, stepped edges on screen at any driver resolution. Text in a TrueType font is written as real glyphs and stays sharp.
 - **inferred:** an MCP host can drop a tool argument called `device`. `set_page_setup` and `plot_pdf` take `plot_device`.
+
+## 2026-11-18: block definitions by CopyObjects (define_block, import_blocks; not live-verified)
+- **documented (2027 ActiveX reference):** `CopyObjects(Objects, Owner)` deep-clones; all objects must have one owner, belonging to the calling document or database; it must not run while a collection is being iterated. `ObjectDBX.AxDbDocument.<release>` (26 for AutoCAD 2027) reads a DWG in memory. `BlockReference.Name` can be set to another existing definition. `Block.Origin` is the base point.
+- **unresolved:** whether CopyObjects accepts a `VT_ARRAY | VT_DISPATCH` VARIANT built from late-bound proxies (`com.objects`).
+- **unresolved:** whether `CopyObjects` from an ObjectDBX document with the target's `Blocks` collection as owner keeps dynamic block data (the usual VBA idiom says it does).
+- **unresolved:** whether setting `Name` on a dynamic reference (drawn by an anonymous `*U` block) switches it cleanly, and whether the renamed old dynamic definition can be deleted while its `*U` copies exist (if not, `import_blocks` reports it for purging).
