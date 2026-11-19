@@ -9,7 +9,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import pythoncom
 import pywintypes
+import win32com.client
 
 from ..app import acad_tool
 from ..com import AcadError, enums, point, rad, rounded
@@ -22,6 +24,8 @@ INTERNAL_PROPERTIES = {"origin"}
 # Exploded attributes come back as text or attribute definitions; they are not geometry.
 NOT_GEOMETRY = {"AcDbAttributeDefinition", "AcDbAttribute", "AcDbText", "AcDbMText"}
 MAX_GEOMETRY = 400
+# Words accepted for a flip state (AutoCAD stores 0 = not flipped, 1 = flipped).
+FLIP_WORDS = {"not flipped": 0, "unflipped": 0, "no": 0, "false": 0, "flipped": 1, "yes": 1, "true": 1}
 
 
 def block_ref(doc: Any, handle: str) -> Any:
@@ -83,8 +87,38 @@ def number(value: Any) -> float:
         raise ValueError(f"'{value}' is not a number") from None
 
 
+def is_short(value: Any) -> bool:
+    """Whole-number properties (a flip state) hold a short integer; pywin32 reads it as int."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def com_value(current: Any, value: Any) -> Any:
+    """What to hand AutoCAD for a property that now holds `current`. A flip state must be sent as
+    a short integer: a double or a long is refused as "Invalid input" (B4)."""
+    if is_short(current):
+        return win32com.client.VARIANT(pythoncom.VT_I2, int(value))
+    return value
+
+
+def whole_number(wanted: Any, name: str) -> int:
+    """1, 1.0, "1", True or "flipped" -> 1, for a flip state."""
+    if isinstance(wanted, bool):
+        return int(wanted)
+    text = str(wanted).strip().lower()
+    if text in FLIP_WORDS:
+        return FLIP_WORDS[text]
+    try:
+        value = number(wanted)
+    except ValueError:
+        value = 0.5  # not a number: refused below
+    if value != int(value):
+        raise AcadError(f"{name} takes a whole number (a flip state: 0 = not flipped, 1 = flipped); "
+                        f"got '{wanted}'.")
+    return int(value)
+
+
 def _set(ref: Any, key: str, value: Any) -> None:
-    block_props(ref)[key].Value = value
+    block_props(ref)[key].Value = com_value(value, value)
 
 
 def apply_properties(ref: Any, values: dict[str, Any], change: Any, allow_hidden: bool = False) -> None:
@@ -108,13 +142,18 @@ def apply_properties(ref: Any, values: dict[str, Any], change: Any, allow_hidden
                     raise AcadError(f"'{wanted}' is not an allowed {prop.PropertyName}; choose from "
                                     f"{', '.join(map(str, allowed))}.")
                 value = str(match)
+        elif is_short(current):
+            value = whole_number(wanted, str(prop.PropertyName))
+            if allowed and value not in [int(a) for a in allowed]:
+                raise AcadError(f"{wanted} is not an allowed {prop.PropertyName}; choose from "
+                                f"{', '.join(str(_plain(a)) for a in allowed)}.")
         else:
             value = number(wanted)
             if allowed and not any(abs(float(a) - value) < 1e-6 for a in allowed):
                 raise AcadError(f"{wanted} is not an allowed {prop.PropertyName}; choose from "
                                 f"{', '.join(str(_plain(a)) for a in allowed)}.")
         change.on_rollback(lambda k=key, old=current: _set(ref, k, old))
-        prop.Value = value
+        prop.Value = com_value(current, value)
 
 
 @contextmanager
@@ -289,10 +328,12 @@ def set_block_properties(handle: str, properties: dict[str, str | float], regen:
     """Set dynamic block properties by name, in the order given, as one undo step; if any
     value is refused, all are put back. Distances take numbers or inch fractions ("1 1/4").
     Lists (e.g. Size) must use one of the allowed values (see get_block_properties).
+    Flip states take 0 / 1, true / false or "not flipped" / "flipped".
 
     Args:
         handle: the block reference's handle.
-        properties: values by property name, e.g. {"Size": "#10-16", "Length": 1.25}.
+        properties: values by property name, e.g. {"Size": "#10-16", "Length": 1.25,
+            "Flip state1": 1}.
         regen: regenerate afterwards so fields in attributes (labels) show the new values.
         allow_hidden: also allow helper properties the author hid (normally driven by
             another property; setting them directly can break the block's lookup).

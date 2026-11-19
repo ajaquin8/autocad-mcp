@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+import pythoncom
 import pywintypes
 from conftest import FakeDoc, FakeDynProp, FakeEntity
 from mcp.server.mcpserver.exceptions import ToolError
@@ -933,6 +934,39 @@ def test_a_refused_value_puts_the_earlier_ones_back(fake_app):
     assert ref.value("Size") == "#12-14" and ref.value("Length") == 1.0
     with pytest.raises(AcadError, match="not an allowed Size; choose from #8-18"):
         blocks.set_block_properties(ref.Handle, {"Size": "#14-10"})
+
+
+class _FlipProp(FakeDynProp):
+    """AutoCAD keeps a flip state as a short integer and refuses a double or a long (B4)."""
+
+    def __init__(self) -> None:
+        super().__init__("Flip state1", 0, (0, 1))
+
+    def __setattr__(self, key, value):
+        if key == "Value" and "Value" in self.__dict__:
+            if getattr(value, "varianttype", None) != pythoncom.VT_I2:
+                raise pywintypes.com_error(-2147024809, "Invalid input", None, None)
+            value = value.value
+        super().__setattr__(key, value)
+
+
+def test_flip_states_are_sent_as_short_integers(fake_app):
+    _, ref = _screw(fake_app)
+    ref.props.append(_FlipProp())
+    info = blocks.set_block_properties(ref.Handle, {"Flip state1": 1})
+    assert ref.value("Flip state1") == 1 and {p["name"]: p["value"] for p in info["properties"]}["Flip state1"] == 1
+    blocks.set_block_properties(ref.Handle, {"flip state1": "not flipped"})
+    assert ref.value("Flip state1") == 0
+    blocks.set_block_properties(ref.Handle, {"Flip state1": True})
+    assert ref.value("Flip state1") == 1
+    # a later refusal puts the flip back, also as a short integer
+    with pytest.raises(AcadError, match="not an allowed Length"):
+        blocks.set_block_properties(ref.Handle, {"Flip state1": 0, "Length": 3})
+    assert ref.value("Flip state1") == 1
+    with pytest.raises(AcadError, match="whole number"):
+        blocks.set_block_properties(ref.Handle, {"Flip state1": 0.5})
+    with pytest.raises(AcadError, match="not an allowed Flip state1; choose from 0, 1"):
+        blocks.set_block_properties(ref.Handle, {"Flip state1": 2})
 
 
 def test_hidden_helpers_and_user_drawings_are_refused(fake_app):
