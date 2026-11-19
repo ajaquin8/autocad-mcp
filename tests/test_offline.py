@@ -2246,11 +2246,12 @@ def test_flip_and_rotation_parameters_follow_the_recorded_prompts(fake_app, monk
     flip = block_authoring.add_flip_parameter("Hinge side", [0, -12], [60, -12], [30, -16])
     turn = block_authoring.add_rotation_parameter("Angle", [30, 42], 10, [30, 56], value_list=[0, 90, 180])
     (_, flip_in, _), (_, turn_in, _) = runs.calls
-    assert flip_in == ["_F", "_L", "Hinge side", "Not flipped", "Flipped", [0, -12], [60, -12], [30, -16]]
+    assert flip_in == ["_F", "_L", "Hinge side", "Not flipped", "Flipped", [0, -12], [60, -12], [30, -16], "1"]
     assert flip["pick_point"] == [15.0, -12.0]
     assert turn_in == ["_R", "_L", "Angle", "_V", "_L", "0,90,180", [30, 42], 10.0, 0.0, [30, 56], "1"]
     assert math.isclose(math.dist(turn["pick_point"], [30, 42]), 10, abs_tol=1e-5)
     for bad in [lambda: block_authoring.add_flip_parameter("F", [0, 0], [0, 0], [1, 1]),
+                lambda: block_authoring.add_flip_parameter("F", [0, 0], [1, 0], [1, 1], grips=2),
                 lambda: block_authoring.add_rotation_parameter("A", [0, 0], 0, [1, 1]),
                 lambda: block_authoring.add_rotation_parameter("A", [0, 0], 1, [1, 1], grips=2)]:
         with pytest.raises(ValueError):

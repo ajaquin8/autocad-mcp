@@ -165,7 +165,7 @@ def set_object_visibility(select: dict, visible: bool, all_states: bool = False,
 
 @acad_tool()
 def add_flip_parameter(label: str, base: Point, end: Point, label_location: Point, unflipped: str = "Not flipped",
-                       flipped: str = "Flipped", name: str = "") -> dict:
+                       flipped: str = "Flipped", grips: int = 1, name: str = "") -> dict:
     """Add a flip parameter in the open Block Editor (BPARAMETER Flip): a reflection line from
     base to end that objects flip about, with a property users see as `label`. Its grip sits at
     base. Returns "pick_point", a point on the line, for add_action(kind="flip").
@@ -175,17 +175,22 @@ def add_flip_parameter(label: str, base: Point, end: Point, label_location: Poin
         base, end: the reflection line [x, y].
         label_location: where the label goes [x, y].
         unflipped, flipped: the property's two values (default "Not flipped" / "Flipped").
+        grips: 0 or 1 (default 1).
         name: which drawing; it must be the active one (default: active).
     """
+    if grips not in (0, 1):
+        raise ValueError("grips is 0 or 1.")
     (x1, y1, _), (x2, y2, _) = xyz(base), xyz(end)
     if math.isclose(x1, x2) and math.isclose(y1, y2):
         raise ValueError("base and end must differ.")
     doc = session.document(name)
     require_editor(doc, True)
-    # Label asks for the label, then the unflipped and flipped values (live 2026-11-18); then the line and the
-    # label location (documented; not seen to the end yet).
+    # Label asks for the label, then the unflipped and flipped values; then the line and the label location
+    # (live 2026-11-18, AMCP-LIVE-20261118-04). One more answer follows: the number of grips, as for the
+    # rotation and visibility parameters (inferred; the check that follows confirms it).
     result = run_checked(doc, f"Adding the flip parameter '{label}'", "BPARAMETER",
-                         ["_F", "_L", label, unflipped, flipped, list(base), list(end), list(label_location)])
+                         ["_F", "_L", label, unflipped, flipped, list(base), list(end), list(label_location),
+                          str(grips)])
     pick = rounded([x1 + 0.25 * (x2 - x1), y1 + 0.25 * (y2 - y1)])
     return {"label": label, "pick_point": pick, "steps": result["steps"]}
 
@@ -214,8 +219,8 @@ def add_rotation_parameter(label: str, base: Point, radius: float, label_locatio
     values = value_set_inputs(value_list, None)
     doc = session.document(name)
     require_editor(doc, True)
-    # Label, base point, radius, default angle, label location (live 2026-11-18); the answer after the label
-    # location (the number of grips) and the angle value set are not seen yet.
+    # Label, base point, radius, default angle, label location, number of grips (live 2026-11-18,
+    # AMCP-LIVE-20261118-03/04). The angle value set is not seen yet.
     result = run_checked(doc, f"Adding the rotation parameter '{label}'", "BPARAMETER",
                          ["_R", "_L", label, *values, list(base), float(radius), float(default_angle),
                           list(label_location), str(grips)])
@@ -227,8 +232,8 @@ def add_rotation_parameter(label: str, base: Point, radius: float, label_locatio
 
 def action_inputs(kind: str, parameter_pick: Point, select: dict, end: str, multiplier: float | None,
                   offset: float | None, location: Point | None) -> list:
-    """BACTION answers per action (live 2026-11-18 for move and scale; flip and rotate not seen yet:
-    their parameters allow one action each, so no action type is asked)."""
+    """BACTION answers per action (live 2026-11-18: move, scale and rotate; a parameter that allows one
+    action, like rotation, asks no action type, so flip is answered the same way)."""
     if kind not in ACTIONS:
         raise ValueError(f"kind is one of {', '.join(ACTIONS)}.")
     if (multiplier not in (None, 1) or offset) and kind != "move":
