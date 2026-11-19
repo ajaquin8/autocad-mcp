@@ -8,9 +8,9 @@ Nothing here is a pass/fail test of a tool: each probe is one run_command call w
 prompt AutoCAD showed) is saved. A probe whose answers do not fit is cancelled and put back by
 run_command, so a wrong guess costs nothing. Steps:
  1. New drawing; a 60 x 84 frame, a mullion, a circle; made into the block "AMCP probe"; Block Editor.
- 2. T10: what COM sees inside the Block Editor (ModelSpace, the block, a "select all" selection set),
-    before and after a LINE drawn there; whether handles from that selection work at SELECT, and a
-    model-space handle does not.
+ 2. T10 (answered by AMCP-LIVE-20261118-02: COM's ModelSpace holds the Block Editor's objects, with
+    new handles): what COM sees, read again at the end. No SELECT probe: in -02 a SELECT left AutoCAD
+    waiting at a prompt right after it ended.
  3. T7: linear parameters with a value list and with an increment.
  4. T6: a visibility parameter, -BVSTATE New/Set, BVHIDE and BVSHOW.
  5. T8: a flip parameter and flip action; a rotation parameter and rotate action; scale and move actions.
@@ -34,7 +34,7 @@ from autocad_mcp.com import MessageFilter, point, retry_seconds
 from autocad_mcp.session import session
 from autocad_mcp.tools import block_editor, block_library, blocks, commands, documents, draw
 
-REPORT = os.environ.get("AMCP_REPORT", "AMCP-LIVE-20261118-02")
+REPORT = os.environ.get("AMCP_REPORT", "AMCP-LIVE-20261118-03")
 BLOCK = "AMCP probe"
 TRANSCRIPTS: dict[str, dict] = {}
 
@@ -117,19 +117,15 @@ def main() -> None:
         if not step("open the Block Editor", block_editor.open_block_editor, BLOCK, name=name):
             return
         old_mode = doc.GetVariable("BACTIONBARMODE")
+        TRANSCRIPTS["BACTIONBARMODE_before"] = str(old_mode)
         doc.SetVariable("BACTIONBARMODE", 0)
         session.app.ZoomWindow(point([-40, -40]), point([140, 120]))
 
-        # 2. T10
-        TRANSCRIPTS["com_in_editor_before"] = com_view(doc)
-        probe(doc, "LINE in the editor", "LINE", [[100, 0], [110, 0], ""])
-        after = com_view(doc)
-        TRANSCRIPTS["com_in_editor_after_line"] = after
-        listed = after.get("select_all") if isinstance(after.get("select_all"), list) else []
+        # 2. T10: the editor's objects as COM lists them (the circle's handle is used by BVSHOW below)
+        view = com_view(doc)
+        TRANSCRIPTS["com_in_editor_before"] = view
+        listed = view.get("select_all") if isinstance(view.get("select_all"), list) else []
         circles = [i["handle"] for i in listed if i["type"] == "AcDbCircle"]
-        if circles:
-            probe(doc, "SELECT with a select-all handle", "SELECT", [{"handle": circles[0]}, ""])
-        probe(doc, "SELECT with a model-space handle", "SELECT", [{"handle": circle["handle"]}, ""])
 
         # 3. T7 value sets (documented options: Value set -> List / Increment)
         probe(doc, "linear with value list", "BPARAMETER",
@@ -165,8 +161,6 @@ def main() -> None:
         TRANSCRIPTS["com_in_editor_end"] = com_view(doc)
 
         # 7. save and look at what a placed reference offers
-        doc.SetVariable("BACTIONBARMODE", old_mode)
-        old_mode = None
         step("close the Block Editor (save)", block_editor.close_block_editor, True, name=name)
         placed = step("place the block", blocks.insert_block, BLOCK, [200, 0], name=name)
         if placed:
@@ -193,5 +187,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-    sys.exit(harness.finish(REPORT))
+    try:
+        main()
+    finally:  # the results are written even if a step crashed
+        code = harness.finish(REPORT)
+    sys.exit(code)
