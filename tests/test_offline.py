@@ -10,7 +10,7 @@ import time
 
 import pytest
 import pywintypes
-from conftest import FakeDoc, FakeEntity
+from conftest import FakeDoc, FakeDynProp, FakeEntity
 from mcp.server.mcpserver.exceptions import ToolError
 
 from autocad_mcp import com
@@ -22,6 +22,7 @@ from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import (
     annotate,
     block_editor,
+    block_library,
     blocks,
     commands,
     control,
@@ -1689,6 +1690,364 @@ def test_attribute_definition_modes_and_checks(fake_app):
     with pytest.raises(AcadError, match="No layer named"):
         blocks.add_attribute_definition("DATE", [0, 0], 0.125, layer="NOPE")
     assert fake_app.doc.ModelSpace.Count == 2  # the one on a missing layer was removed again
+
+
+# ---------- block definitions: define_block, import_blocks ----------
+
+
+class _Item:
+    """An object inside a fake block definition or space."""
+
+    _handles = 0x9000
+
+    def __init__(self, owner, object_name="AcDbLine", **props):
+        _Item._handles += 1
+        self.Handle, self.ObjectName, self.owner = f"{_Item._handles:X}", object_name, owner
+        self.__dict__.update(props)
+
+    @property
+    def OwnerID(self):  # noqa: N802
+        return self.owner.ObjectID
+
+    def Delete(self):  # noqa: N802
+        self.owner.items.remove(self)
+
+    def clone(self, owner):
+        props = {k: v for k, v in self.__dict__.items() if k not in ("Handle", "ObjectName", "owner")}
+        return _Item(owner, self.ObjectName, **props)
+
+
+class _Ref(_Item):
+    """A block reference: follows its definition by identity (so a renamed definition keeps it), and a
+    dynamic one is drawn by an anonymous copy."""
+
+    def __init__(self, owner, definition, **props):
+        super().__init__(owner, "AcDbBlockReference", **props)
+        self.definition = definition
+        self.props = [FakeDynProp(n, v, allowed) for n, (v, allowed) in definition.dynamic.items()]
+
+    @property
+    def EffectiveName(self):  # noqa: N802
+        return self.definition.Name
+
+    @property
+    def IsDynamicBlock(self):  # noqa: N802
+        return bool(self.definition.dynamic)
+
+    @property
+    def Name(self):  # noqa: N802
+        return "*U7" if self.definition.dynamic else self.definition.Name
+
+    @Name.setter
+    def Name(self, value):  # noqa: N802
+        self.definition = self.owner.table.Item(value)  # refused unless that definition exists
+        self.props = [FakeDynProp(n, v, allowed) for n, (v, allowed) in self.definition.dynamic.items()]
+
+    def GetDynamicBlockProperties(self):  # noqa: N802
+        return list(self.props)
+
+    def clone(self, owner):
+        return _Ref(owner, owner.table.Item(self.definition.Name))
+
+
+class _Def:
+    _ids = 500
+
+    def __init__(self, table, name, origin=(0.0, 0.0, 0.0), layout=False, dynamic=None):
+        _Def._ids += 1
+        self.ObjectID, self.table, self.Name, self.Origin = _Def._ids, table, name, tuple(origin)
+        self.IsLayout, self.IsXRef, self.dynamic, self.items = layout, False, dict(dynamic or {}), []
+
+    @property
+    def IsDynamicBlock(self):  # noqa: N802
+        return bool(self.dynamic)
+
+    @property
+    def Origin(self):  # noqa: N802 - read back as a tuple, set with a VARIANT, as over COM
+        return self._origin
+
+    @Origin.setter
+    def Origin(self, value):  # noqa: N802
+        self._origin = tuple(float(v) for v in _xyz_of(value))
+
+    @property
+    def Count(self):  # noqa: N802
+        return len(self.items)
+
+    def Item(self, i):  # noqa: N802
+        return self.items[i]
+
+    def add(self, item):
+        self.items.append(item)
+        return item
+
+    def Delete(self):  # noqa: N802
+        if any(isinstance(i, _Ref) and i.definition is self for d in self.table.defs for i in d.items):
+            raise _com_error(-2145386420)  # still referenced
+        self.table.defs.remove(self)
+
+    def InsertBlock(self, insertion, name, xs, ys, zs, rotation):  # noqa: N802
+        return self.add(_Ref(self, self.table.Item(name), InsertionPoint=_xyz_of(insertion)))
+
+
+def _xyz_of(variant):
+    return tuple(getattr(variant, "value", variant))
+
+
+class _Table:
+    """A drawing's Blocks collection plus its CopyObjects (deep cloning, like AutoCAD's)."""
+
+    def __init__(self):
+        self.defs = []
+        self.model = self.new("*Model_Space", layout=True)
+        self.copies = 0
+        self.fail_copy = False
+
+    def new(self, name, **kw):
+        definition = _Def(self, name, **kw)
+        self.defs.append(definition)
+        return definition
+
+    @property
+    def Count(self):  # noqa: N802
+        return len(self.defs)
+
+    def Item(self, key):  # noqa: N802
+        if isinstance(key, int):
+            return self.defs[key]
+        for d in self.defs:
+            if d.Name.lower() == str(key).lower():
+                return d
+        raise _com_error(-2145386476)
+
+    def Add(self, origin, name):  # noqa: N802
+        if any(d.Name.lower() == name.lower() for d in self.defs):
+            raise _com_error(-2145386476)
+        return self.new(name, origin=_xyz_of(origin))
+
+    def CopyObjects(self, objs, owner):  # noqa: N802
+        self.copies += 1
+        if self.fail_copy:
+            raise _com_error(-2147467259)
+        items = list(objs.value)
+        if isinstance(owner, _Table):  # whole definitions, nested ones first, same names mapped to existing
+            def clone(definition):
+                try:
+                    return owner.Item(definition.Name)
+                except pywintypes.com_error:
+                    pass
+                for i in definition.items:
+                    if isinstance(i, _Ref):
+                        clone(i.definition)
+                copy = owner.new(definition.Name, origin=definition.Origin, dynamic=definition.dynamic)
+                copy.items = [i.clone(copy) for i in definition.items]
+                return copy
+            return tuple(clone(d) for d in items)
+        copies = tuple(owner.add(i.clone(owner) if hasattr(i, "clone") else _Item(owner, i.ObjectName))
+                       for i in items)
+        return copies, ()  # late binding hands back the IDPairs output too (live 2026-11-18)
+
+
+def _library_drawing(fake_app, monkeypatch, tmp_path):
+    """The drawing being built (owned, Blocks faked) and a library file read through ObjectDBX."""
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    doc.Blocks = _Table()
+    doc.CopyObjects = doc.Blocks.CopyObjects
+    doc.variables["BLOCKEDITOR"] = 0
+    path = tmp_path / "Library.dwg"
+    path.write_bytes(b"")
+
+    class _Dbx:
+        Blocks = _Table()
+        opened = None
+
+        def Open(self, p):  # noqa: N802
+            self.opened = p
+
+        def CopyObjects(self, objs, owner):  # noqa: N802
+            return self.Blocks.CopyObjects(objs, owner)
+    dbx = _Dbx()
+    progids = []
+    fake_app.GetInterfaceObject = lambda progid: progids.append(progid) or dbx
+    return doc, dbx, str(path), progids
+
+
+def _model_items(fake_app, doc):
+    """define_block's objects live in the fake model space (FakeSpace), which needs an ObjectID."""
+    doc.space.ObjectID = 11
+    a = doc.space.AddLine(com.point([0, 0]), com.point([10, 0]))
+    b = doc.space.AddCircle(com.point([5, 5]), 2.0)
+    for ent in (a, b):
+        ent.OwnerID = 11
+    return a, b
+
+
+def test_define_block_copies_objects_into_a_new_definition(fake_app, monkeypatch, tmp_path):
+    doc, _, _, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    a, b = _model_items(fake_app, doc)
+    c = doc.space.AddLine(com.point([0, 1]), com.point([10, 1]))
+    c.OwnerID = 11
+    out = block_library.define_block("Door tag", [a.Handle, b.Handle, c.Handle], [5, 0])
+    made = doc.Blocks.Item("Door tag")
+    assert out == {"block": "Door tag", "base_point": [5.0, 0.0, 0.0], "objects": 3, "redefined": False,
+                   "originals": "keep"}  # counted in the definition, not from CopyObjects' pair (live 2026-11-18)
+    assert made.Origin == (5.0, 0.0, 0.0) and [i.ObjectName for i in made.items] == ["AcDbLine", "AcDbCircle",
+                                                                                    "AcDbLine"]
+    assert a in doc.space.items and doc.undo_log[-2:] == ["start", "end"]  # kept; one undo step
+
+
+def test_define_block_refuses_what_it_should(fake_app, monkeypatch, tmp_path):
+    doc, _, _, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    a, b = _model_items(fake_app, doc)
+    doc.Blocks.new("Door tag")
+    with pytest.raises(AcadError, match="already exists.*redefine=True"):
+        block_library.define_block("Door tag", [a.Handle], [0, 0])
+    doc.Blocks.new("Window", dynamic={"Width": (36.0, ())})
+    with pytest.raises(AcadError, match="dynamic block.*import_blocks"):
+        block_library.define_block("Window", [a.Handle], [0, 0], redefine=True)
+    b.OwnerID = 12
+    with pytest.raises(AcadError, match="different spaces"):
+        block_library.define_block("New", [a.Handle, b.Handle], [0, 0])
+    for bad in ["", " lead", "a/b", "x" * 256]:
+        with pytest.raises(ValueError, match="not a usable block name"):
+            block_library.define_block(bad, [a.Handle], [0, 0])
+    with pytest.raises(ValueError, match="originals"):
+        block_library.define_block("New", [a.Handle], [0, 0], originals="explode")
+    doc.variables["BLOCKEDITOR"] = 1
+    with pytest.raises(AcadError, match="Block Editor is open"):
+        block_library.define_block("New", [a.Handle], [0, 0])
+    doc.variables["BLOCKEDITOR"] = 0
+    fake_app.doc.variables["CMDACTIVE"] = 1
+    with pytest.raises(AcadError, match="busy"):
+        block_library.define_block("New", [a.Handle], [0, 0])
+    assert [d.Name for d in doc.Blocks.defs] == ["*Model_Space", "Door tag", "Window"]
+
+
+def test_define_block_redefines_and_puts_the_old_contents_back_on_failure(fake_app, monkeypatch, tmp_path):
+    doc, _, _, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    a, b = _model_items(fake_app, doc)
+    old = doc.Blocks.new("Door tag", origin=(1.0, 1.0, 0.0))
+    old.add(_Item(old, "AcDbArc"))
+    real_copy = doc.Blocks.CopyObjects
+
+    def fail_on_the_new_contents(objs, owner):
+        if owner is old and any(o is a for o in objs.value):
+            raise _com_error(-2147467259)
+        return real_copy(objs, owner)
+    doc.CopyObjects = fail_on_the_new_contents
+    with pytest.raises(pywintypes.com_error):  # through MCP it becomes a ToolError
+        block_library.define_block("Door tag", [a.Handle], [5, 0], redefine=True)
+    assert [i.ObjectName for i in old.items] == ["AcDbArc"] and old.Origin == (1.0, 1.0, 0.0)
+    assert [d.Name for d in doc.Blocks.defs] == ["*Model_Space", "Door tag"]  # no backup left behind
+    doc.CopyObjects = real_copy
+    out = block_library.define_block("Door tag", [a.Handle, b.Handle], [5, 0], redefine=True)
+    assert out["redefined"] and [i.ObjectName for i in old.items] == ["AcDbLine", "AcDbCircle"]
+    assert old.Origin == (5.0, 0.0, 0.0) and "regen" in doc.undo_log
+    assert [d.Name for d in doc.Blocks.defs] == ["*Model_Space", "Door tag"]
+
+
+def test_define_block_can_replace_the_originals_with_a_reference(fake_app, monkeypatch, tmp_path):
+    doc, _, _, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    a, b = _model_items(fake_app, doc)
+    out = block_library.define_block("Door tag", f"{a.Handle}, {b.Handle}", [5, 0], originals="replace")
+    assert a not in doc.space.items and b not in doc.space.items
+    ref = doc.HandleToObject(out["reference"])
+    assert ref.InsertionPoint == (5.0, 0.0, 0.0) and ref.EffectiveName == "Door tag"
+
+
+def _library(dbx):
+    """The library file: a dynamic Window (with a nested Sash), a Tag, and Title."""
+    lib = dbx.Blocks
+    sash = lib.new("Sash")
+    sash.add(_Item(sash))
+    window = lib.new("Window", dynamic={"Width": (36.0, (24.0, 36.0, 48.0)), "Swing": ("Left", ("Left", "Right"))})
+    window.add(_Item(window, "AcDbPolyline"))
+    window.add(_Ref(window, sash))
+    tag = lib.new("Tag")
+    tag.add(_Item(tag, "AcDbAttributeDefinition", TagString="MARK"))
+    lib.new("Title")
+    return lib
+
+
+def test_import_blocks_brings_new_definitions_in_whole_and_skips_existing(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    doc.Blocks.new("Tag")  # already in the drawing
+    out = block_library.import_blocks(path, ["window", "Tag"])
+    assert progids == ["ObjectDBX.AxDbDocument.26"] and dbx.opened == path  # read, not opened as a tab
+    assert out["imported"] == ["Window"] and out["skipped_existing"] == ["Tag"] and out["replaced"] == []
+    assert out["nested_brought_in"] == ["sash"]
+    window = doc.Blocks.Item("Window")
+    assert window.dynamic and [i.ObjectName for i in window.items] == ["AcDbPolyline", "AcDbBlockReference"]
+    assert doc.Blocks.Item("Tag").items == []  # left as it was
+    every = block_library.import_blocks(path)
+    assert every["imported"] == ["Title"] and set(every["skipped_existing"]) == {"Sash", "Window", "Tag"}
+
+
+def test_import_blocks_overwrite_switches_every_reference_and_keeps_its_values(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    old = doc.Blocks.new("Window", dynamic={"Width": (36.0, (24.0, 36.0)), "Swing": ("Left", ("Left", "Right")),
+                                            "Mullions": (1.0, ())})
+    old.add(_Item(old, "AcDbLine"))
+    placed = doc.Blocks.model.add(_Ref(doc.Blocks.model, old, InsertionPoint=(10, 20, 0)))
+    placed.props[0].Value, placed.props[1].Value = 24.0, "Right"
+    legend = doc.Blocks.new("Legend")
+    nested = legend.add(_Ref(legend, old))
+    nested.props[2].Value = 3.0
+    out = block_library.import_blocks(path, ["Window"], overwrite=True)
+    new = doc.Blocks.Item("Window")
+    assert out["replaced"] == ["Window"] and out["imported"] == [] and out["references_switched"] == 2
+    assert new is not old and placed.definition is new and nested.definition is new
+    assert placed.InsertionPoint == (10, 20, 0)
+    assert {p.PropertyName: p.Value for p in placed.props} == {"Width": 24.0, "Swing": "Right"}
+    assert out["values_not_restored"] == {h: ["Mullions"] for h in (placed.Handle, nested.Handle)}  # gone in the new
+    assert old not in doc.Blocks.defs and "old_definitions_left" not in out  # the old definition is gone
+    assert "regen" in doc.undo_log
+
+
+def test_import_blocks_puts_everything_back_when_it_fails(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    old = doc.Blocks.new("Window", dynamic={"Width": (36.0, (24.0, 36.0))})
+    placed = doc.Blocks.model.add(_Ref(doc.Blocks.model, old))
+    placed.props[0].Value = 24.0
+
+    def regen_fails(which):
+        raise _com_error(-2147467259)
+    doc.Regen = regen_fails
+    with pytest.raises(pywintypes.com_error):
+        block_library.import_blocks(path, ["Window"], overwrite=True)
+    assert old.Name == "Window" and doc.Blocks.Item("Window") is old and placed.definition is old
+    assert placed.props[0].Value == 24.0
+    assert [d.Name for d in doc.Blocks.defs] == ["*Model_Space", "Window"]  # copies and nested Sash removed
+
+
+def test_import_blocks_checks_before_touching_anything(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    with pytest.raises(AcadError, match="no block 'Door'.*It has: Sash, Tag, Title, Window"):
+        block_library.import_blocks(path, ["Door"])
+    with pytest.raises(AcadError, match="Not found or not a drawing"):
+        block_library.import_blocks(str(tmp_path / "missing.dwg"))
+    with pytest.raises(AcadError, match="Not found or not a drawing"):
+        block_library.import_blocks(str(tmp_path))
+    session.owned.clear()
+    with pytest.raises(AcadError, match="locked"):
+        block_library.import_blocks(path)
+    assert dbx.Blocks.copies == 0 and [d.Name for d in doc.Blocks.defs] == ["*Model_Space"]
+
+
+def test_import_blocks_reads_an_open_library_from_autocad(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    opened = FakeDoc("Library.dwg", path)
+    opened.Blocks = _Table()
+    opened.Blocks.new("Title")
+    opened.CopyObjects = opened.Blocks.CopyObjects
+    fake_app.Documents.docs.append(opened)
+    out = block_library.import_blocks(path)
+    assert out["imported"] == ["Title"] and out["source"] == "'Library.dwg' (open in AutoCAD)" and progids == []
 
 
 # ---------- text justification and style (T5) ----------

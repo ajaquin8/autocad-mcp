@@ -307,6 +307,13 @@ Writer: Claude Code, on the user's request to work through the improvement list 
 - Tests: 9 new offline tests (128 in total); the five checks of `scripts\check.ps1` pass (run one by one: the script itself is blocked by this PC's PowerShell execution policy). **Nothing here is live-verified**; B1 and B2 are fixes for an inferred cause.
 - Updated: [[Research/AutoCAD API gotchas]], Tool reference.
 
+## 2026-11-18: define_block and import_blocks (T2, T3)
+Writer: Claude Code, on the user's go ("Continue to T2, T3"), step 2 of the improvement list. Branch `feat/block-library` (from `main`; separate from `fix/activate-and-hangs`), one commit per item.
+- **T2:** new tool `define_block`: copies objects (any one space) into a new or existing definition with `CopyObjects`, base point as the insertion point. Redefining keeps a backup copy for rollback; dynamic blocks are refused. Originals kept, deleted or replaced by a reference.
+- **T3:** new tool `import_blocks`: reads a library drawing with ObjectDBX (or the open document) and deep-clones the chosen definitions. `overwrite=True` renames the old definition aside, clones the new one, switches every reference to it (keeping placement, attributes and dynamic property values where still allowed), then deletes the old definition.
+- New module `autocad_mcp/tools/block_library.py`; `com.objects()` builds the VARIANT array of objects CopyObjects takes.
+- Tests: 9 new offline tests with a fake block table and deep copy; the five checks pass. **Not live-verified**; see the open questions in [[Research/AutoCAD API gotchas]].
+
 ## 2026-11-18: text justification and style; which space drawing tools use (T5, B6)
 Writer: Claude Code, on the user's go ("Continue to T5, B6"), step 3 of the improvement list. Branch `feat/text-and-space` (from `main`), one commit per item.
 - **T5:** `add_text` and `add_attribute_definition` take `justify` (13 justifications, or TL, MC, BR ...) and `style`; `add_mtext` takes `attachment` and `style`. With a justification, `position` is the justification point. Unknown styles are refused with the drawing's list.
