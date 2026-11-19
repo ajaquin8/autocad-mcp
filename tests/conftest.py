@@ -38,6 +38,10 @@ class FakeEntity:
         self._doc = doc
         self.__dict__.update(props)
 
+    def __setattr__(self, name, value) -> None:
+        # A point set over COM as a VARIANT array reads back as a tuple, as from AutoCAD.
+        super().__setattr__(name, tuple(value.value) if hasattr(value, "varianttype") else value)
+
     def Update(self) -> None:  # noqa: N802 - mirrors the COM API
         pass
 
@@ -139,7 +143,16 @@ class FakeSpace:
     def AddAttribute(self, height, mode, prompt, insertion, tag, value):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbAttributeDefinition", Height=height, Mode=mode,
                                     PromptString=prompt, InsertionPoint=_xyz(insertion), TagString=tag,
-                                    TextString=value))  # the tag keeps its case, as over COM (2026-11-10)
+                                    TextString=value, StyleName="Standard", Alignment=0))
+        # the tag keeps its case, as over COM (2026-11-10)
+
+    def AddText(self, text, insertion, height):  # noqa: N802
+        return self._add(FakeEntity(self.doc, "AcDbText", TextString=text, InsertionPoint=_xyz(insertion),
+                                    Height=height, Rotation=0.0, StyleName="Standard", Alignment=0))
+
+    def AddMText(self, insertion, width, text):  # noqa: N802
+        return self._add(FakeEntity(self.doc, "AcDbMText", TextString=text, InsertionPoint=_xyz(insertion),
+                                    Width=width, Height=0.2, StyleName="Standard", AttachmentPoint=1))
 
     def AddMLeader(self, points, index):  # noqa: N802
         flat = list(_xyz(points))

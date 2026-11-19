@@ -2048,3 +2048,93 @@ def test_import_blocks_reads_an_open_library_from_autocad(fake_app, monkeypatch,
     fake_app.Documents.docs.append(opened)
     out = block_library.import_blocks(path)
     assert out["imported"] == ["Title"] and out["source"] == "'Library.dwg' (open in AutoCAD)" and progids == []
+
+
+# ---------- text justification and style (T5) ----------
+
+
+@pytest.fixture()
+def text_enums(monkeypatch):
+    names = ["Left", "Center", "Right", "Aligned", "Middle", "Fit", "TopLeft", "TopCenter", "TopRight", "MiddleLeft",
+             "MiddleCenter", "MiddleRight", "BottomLeft", "BottomCenter", "BottomRight"]
+    values = {f"acAlignment{n}": i for i, n in enumerate(names)}
+    corners = ["TopLeft", "TopCenter", "TopRight", "MiddleLeft", "MiddleCenter", "MiddleRight", "BottomLeft",
+               "BottomCenter", "BottomRight"]
+    values.update({f"acAttachmentPoint{n}": i for i, n in enumerate(corners, start=1)})
+    monkeypatch.setattr(com.enums, "_values", {**com.enums._values, **values})
+
+
+def test_add_text_centres_on_the_point_in_the_style_asked_for(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    out = draw.add_text("BATH", [5, 5], 0.125, justify="MC", style="notes-text")
+    ent = fake_app.doc.HandleToObject(out["handle"])
+    assert ent.Alignment == 10 and ent.TextAlignmentPoint == (5.0, 5.0, 0.0)
+    assert ent.StyleName == "NOTES-TEXT" and out["style"] == "NOTES-TEXT"
+    assert out["justify"] == "middle_center" and out["justification_point"] == [5.0, 5.0, 0.0]
+    plain = draw.add_text("NOTE", [0, 0], 0.125)
+    assert plain["justify"] == "left" and fake_app.doc.HandleToObject(plain["handle"]).Alignment == 0
+    assert draw.add_text("R", [1, 1], 0.1, justify="Bottom Right")["justify"] == "bottom_right"
+
+
+def test_add_text_refuses_unknown_justification_and_style_and_leaves_nothing(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    with pytest.raises(AcadError, match="justify is one of left, center"):
+        draw.add_text("X", [0, 0], 0.1, justify="fit")  # fit and aligned need two points: not offered
+    with pytest.raises(AcadError, match="No text style named 'ROMANS'.*Standard, NOTES-TEXT"):
+        draw.add_text("X", [0, 0], 0.1, style="ROMANS")
+    assert fake_app.doc.ModelSpace.Count == 0
+
+
+def test_add_mtext_attachment_and_style(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    out = draw.add_mtext(r"LIVING\PROOM", [10, 4], 3, attachment="middle_center", style="NOTES-TEXT")
+    ent = fake_app.doc.HandleToObject(out["handle"])
+    assert ent.AttachmentPoint == 5 and ent.InsertionPoint == (10.0, 4.0, 0.0)
+    assert out["attachment"] == "middle_center" and ent.StyleName == "NOTES-TEXT"
+    assert draw.add_mtext("A", [0, 0], 1)["attachment"] == "top_left"
+    with pytest.raises(AcadError, match="attachment is one of"):
+        draw.add_mtext("A", [0, 0], 1, attachment="middle")
+
+
+def test_attribute_definition_can_be_centred_in_a_style(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    info = blocks.add_attribute_definition("MARK", [2, 3], 0.1, justify="middle_center", style="NOTES-TEXT")
+    att = fake_app.doc.HandleToObject(info["handle"])
+    assert att.Alignment == 10 and att.TextAlignmentPoint == (2.0, 3.0, 0.0)
+    assert info["style"] == "NOTES-TEXT" and info["justify"] == "middle_center"
+
+
+# ---------- which space the drawing tools use (B6) ----------
+
+
+def test_draw_tools_say_which_space_and_warn_when_a_sheet_is_active(fake_app):
+    # B6: with a sheet tab active, draw_* still wrote to model space unnoticed, and the next -BLOCK said
+    # "not in current space". Model space stays the default; the result now says so.
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    doc.ActiveLayout = doc.Layouts.Item(0)  # Sheet1, paper space current
+    line = draw.draw_line([0, 0], [1, 0])
+    assert line["space"] == "model" and "Sheet1" in line["note"] and "layout='Sheet1'" in line["note"]
+    assert doc.HandleToObject(line["handle"]) in doc.space.items
+    doc.MSpace = True  # working inside a viewport: model space is the current space
+    assert "note" not in draw.draw_circle([0, 0], 1)
+    doc.MSpace, doc.ActiveLayout = False, doc.Layouts.Item(1)  # the Model tab
+    plain = draw.draw_line([0, 0], [2, 1])
+    assert plain["space"] == "model" and "note" not in plain
+
+
+def test_draw_tools_can_draw_on_a_sheet(fake_app, text_enums):
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    circle = draw.draw_circle([5, 5], 1, layout="sheet1")
+    assert (circle["space"], circle["layout"]) == ("paper", "Sheet1") and "note" not in circle
+    assert doc.HandleToObject(circle["handle"]) in doc.paper.items
+    text = draw.add_text("A-101", [10, 1], 0.2, justify="BR", layout="Sheet1")
+    assert text["space"] == "paper" and doc.HandleToObject(text["handle"]) in doc.paper.items
+    att = blocks.add_attribute_definition("SHEET", [1, 1], 0.2, layout="Sheet1")
+    assert att["space"] == "paper" and doc.HandleToObject(att["handle"]) in doc.paper.items
+    centre = draw.draw_center_mark([0, 0], 1, layout="Sheet1")
+    assert centre["space"] == "paper" and len(doc.paper.items) == 5
+    assert draw.draw_line([0, 0], [1, 1], layout="Model")["space"] == "model"
+    with pytest.raises(AcadError, match="No layout named 'A-101'.*Sheet1, Model"):
+        draw.draw_line([0, 0], [1, 1], layout="A-101")

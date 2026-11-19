@@ -187,6 +187,11 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **unresolved:** whether `CopyObjects` from an ObjectDBX document with the target's `Blocks` collection as owner keeps dynamic block data (the usual VBA idiom says it does).
 - **unresolved:** whether setting `Name` on a dynamic reference (drawn by an anonymous `*U` block) switches it cleanly, and whether the renamed old dynamic definition can be deleted while its `*U` copies exist (if not, `import_blocks` reports it for purging).
 
+## 2026-11-18: text justification over COM (T5; not live-verified)
+- **documented / inferred:** a TEXT or ATTDEF is justified by setting `Alignment` (AcAlignment) and then `TextAlignmentPoint`; `InsertionPoint` is then computed by AutoCAD. Fit and Aligned need two points and are left out of `justify`.
+- **unresolved:** whether setting an MTEXT's `AttachmentPoint` keeps `InsertionPoint` where it was (`add_mtext` sets it again afterwards to be sure).
+- **user-reported (B6):** with a sheet tab active, objects added to `ModelSpace` are not in the current space, so `-BLOCK` refuses them ("not in current space").
+
 ## 2026-11-18: live results ([[Sources/2026-11-18 Improvement list live check]])
 - **observed:** `Document.CopyObjects` called through late binding returned a pair (the copies and the IDPairs output), so `len()` of the result was 2 whatever was copied. Count the target instead.
 - **verified:** inside the Block Editor, `(handent "<handle of a model-space object>")` gives nothing; a selection built from it is empty. `HandleToObject` over COM still found the object, and its `OwnerID` did not match any layout's `Block.ObjectID` there (**unresolved:** why).
