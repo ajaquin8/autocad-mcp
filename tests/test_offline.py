@@ -1114,7 +1114,7 @@ def test_run_command_returns_the_transcript(fake_app, command_line):
     out = json.loads(result.content[0].text)
     assert out["completed"] and out["problem"] is None and out["inputs_used"] == 2
     assert [s["sent"] for s in out["steps"]] == ["_.BPARAMETER", "_L", "[0, 0]"]
-    assert out["undo_mark"] and out["messages"] == len(fake.sent) >= 3
+    assert out["undo_mark"] and out["pieces_sent"] == len(fake.sent) >= 3
     assert fake.sent[-1] == "(eval (read amcp:src))\n" and all(m.endswith("\n") for m in fake.sent)
     assert not list(commands.RUN_DIR.iterdir())  # the transcript file is removed
 
@@ -1147,6 +1147,25 @@ def test_run_command_pairs_each_answer_with_its_prompt(fake_app, command_line):
     assert commands.read_line(48.0, "Enter value <1>: 48") == {"prompt": "Enter value <1>:"}
     assert commands.read_line("_L", "Enter set type [None/List] <None> : _L") == {
         "prompt": "Enter set type [None/List] <None> :"}
+
+
+def test_run_command_compact_result_keeps_what_matters(fake_app, command_line):
+    # E1: a long build only needs whether it completed, the last prompt and lines such as "1 found".
+    lines = ["B	", "C	Command: _.ERASE", "P	Select objects:   2 found", "P	Select objects:", "D	0"]
+    command_line(_FakeAutoCAD(lines))
+    result = asyncio.run(mcp.call_tool("run_command", {"command": "ERASE", "inputs": [{"handles": ["2A", "2B"]}, ""],
+                                                       "compact": True}))
+    out = json.loads(result.content[0].text)
+    assert out == {"command": "_.ERASE", "drawing": "Drawing1.dwg", "completed": True, "inputs_used": 2,
+                   "inputs_given": 2, "last_prompt": "Select objects:", "messages": ["answer 1: 2 found"]}
+    # When it fails, the problem and the last steps come back.
+    many = ["B	", "C	Command: _.LINE"] + [f"P	Specify next point or [Undo]: {i},0" for i in range(10)]
+    command_line(_FakeAutoCAD(many + ["A	Specify next point or [Undo]: 9,0", "K	*Cancel*", "U	", "D	0"]))
+    full = commands.run(fake_app.doc, "LINE", [f"{i},0" for i in range(10)])
+    out = commands.compact_result(full)
+    assert not out["completed"] and out["cancelled"] and out["undone"] and "cancelled" in out["problem"]
+    assert len(out["steps"]) == commands.FAILED_STEPS and out["steps_shown"] == "the last 8 of 11"
+    assert out["steps"][-1] == {"sent": "9,0", "prompt": "Specify next point or [Undo]:"}
 
 
 def test_run_command_shows_the_open_prompt_only_when_autocad_printed_it(fake_app, command_line):

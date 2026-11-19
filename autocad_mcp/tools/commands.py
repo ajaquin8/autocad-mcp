@@ -68,6 +68,7 @@ MAX_MESSAGE = 900  # characters per WM_COPYDATA message; AutoCAD drops a message
 POLL = 0.05
 MAX_INPUTS = 60
 MAX_TEXT = 256
+FAILED_STEPS = 8  # steps a compact result keeps when the command did not complete
 
 COMMAND_NAME = re.compile(r"^[_.]*-?[A-Za-z][A-Za-z0-9_-]{0,63}$")
 HANDLE = re.compile(r"^[0-9A-Fa-f]{1,16}$")
@@ -432,6 +433,38 @@ def problem(result: dict) -> str | None:
     return None
 
 
+def compact_result(result: dict) -> dict:
+    """The short form of a result (E1): whether it completed, what went wrong, the last prompt, and only
+    the lines AutoCAD printed besides prompts ("1 found"). The steps are kept, the last few, only when the
+    command did not complete."""
+    steps = result["steps"]
+    out: dict[str, Any] = {"command": result["command"], "drawing": result.get("drawing"),
+                           "completed": result["completed"]}
+    if result.get("problem"):
+        out["problem"] = result["problem"]
+    out["inputs_used"], out["inputs_given"] = result["inputs_used"], result["inputs_given"]
+    if steps:
+        out["last_prompt"] = steps[-1].get("prompt") or steps[-1].get("message")
+    said = []
+    for i, step in enumerate(steps):
+        where = f"answer {i}" if i else "command"
+        if step.get("message"):
+            said.append(f"{where}: {step['message']}")
+        if step.get("answered_as"):
+            said.append(f"{where}: the point was taken as text {step['answered_as']!r} (answers out of step?)")
+    if said:
+        out["messages"] = said
+    for key in ("left_waiting_at", "cancelled", "cancelled_afterwards", "undone", "missing_object",
+                "ended_early_before_input", "lisp_error"):
+        if result.get(key) not in (None, False):
+            out[key] = result[key]
+    if not result["completed"] and steps:
+        out["steps"] = steps[-FAILED_STEPS:]
+        if len(steps) > FAILED_STEPS:
+            out["steps_shown"] = f"the last {FAILED_STEPS} of {len(steps)}"
+    return out
+
+
 def is_system_variable(doc: Any, name: str) -> bool:
     """True if AutoCAD knows `name` as a system variable (typing one changes it: refused here)."""
     try:
@@ -563,7 +596,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
         with contextlib.suppress(OSError):
             path.unlink()
     result["drawing"] = str(doc.Name)
-    result["messages"] = len(messages)
+    result["pieces_sent"] = len(messages)
     result["undo_mark"] = undo
     # Safety net: the expression should never leave a command waiting; if one is, cancel it. Looked at twice.
     waiting = not autocad_answers(doc)
@@ -580,7 +613,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
 
 @acad_tool(destructive=True)
 def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
-                undo_on_failure: bool = True, timeout_seconds: float = 30) -> dict:
+                undo_on_failure: bool = True, timeout_seconds: float = 30, compact: bool = False) -> dict:
     """Run one AutoCAD command with a list of answers to its prompts, in a drawing this
     server created (the edit guard and busy check apply). Use it for prompt-driven
     commands no other tool covers, e.g. Block Editor commands (BPARAMETER, BACTION) or
@@ -609,6 +642,9 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
     command was cancelled, if AutoCAD had printed it. "completed" is true only when every
     answer was used and the command ended with the last one.
 
+    compact=True returns a short result for long builds: completed, problem, the last
+    prompt and AutoCAD's other lines ("1 found"); the steps only if it did not complete.
+
     Args:
         command: command name, e.g. "BPARAMETER" or "-PURGE" (sent as "_.<name>").
         inputs: answers in order.
@@ -617,5 +653,7 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
             not used around BEDIT/BCLOSE/BSAVE).
         timeout_seconds: how long to wait for the command to finish before cancelling it
             (default 30, max 150).
+        compact: return the short result (default False: every step).
     """
-    return run(session.document(name), command, inputs or [], undo_on_failure, timeout_seconds)
+    result = run(session.document(name), command, inputs or [], undo_on_failure, timeout_seconds)
+    return compact_result(result) if compact else result
