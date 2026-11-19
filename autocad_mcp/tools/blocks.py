@@ -14,7 +14,7 @@ import pywintypes
 from ..app import acad_tool
 from ..com import AcadError, enums, point, rad, rounded
 from ..session import session
-from .draw import Point, place
+from .draw import TEXT_JUSTIFY, Point, finish_text, justification, place
 from .entities import attributes, by_handle, find_layout
 
 # Not real block properties: "Origin" is the base point AutoCAD lists for every dynamic block.
@@ -365,14 +365,15 @@ def measure_block(handle: str, include_geometry: bool = False, name: str = "") -
 @acad_tool()
 def add_attribute_definition(tag: str, position: Point, height: float, prompt: str = "", default: str = "",
                              invisible: bool = False, constant: bool = False, preset: bool = False,
-                             lock_position: bool = True, layer: str = "", name: str = "") -> dict:
+                             lock_position: bool = True, layer: str = "", justify: str = "left", style: str = "",
+                             name: str = "") -> dict:
     """Add an attribute definition (ATTDEF) in model space: a fill-in field such as a sheet
     number or a part mark. Use it while drawing a block in its own drawing: save that drawing,
     insert it by path with insert_block, and the block has these attributes to fill in.
 
     Args:
         tag: the attribute's name, e.g. "SHEET" (no spaces or "!"; stored in upper case).
-        position: where the text starts [x, y] (its left end, on the baseline).
+        position: the justification point [x, y]: the left end of the baseline by default.
         height: text height in drawing units.
         prompt: the question AutoCAD asks when the block is inserted by hand (default: the tag).
         default: the value a new block starts with.
@@ -382,6 +383,9 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
         lock_position: the text cannot be dragged away inside the block (default True; the
             Block Editor's actions need it too).
         layer: layer to put it on (default: current layer).
+        justify: left (default), center, right, middle, top_left ... bottom_right, or TL,
+            MC, BR ... (as add_text), e.g. middle_center for a value centred in a tag.
+        style: text style to use (default: the current one).
         name: which open drawing (default: active).
     """
     label = tag.strip().upper()  # over COM AutoCAD keeps the case as given (verified 2026-11-10)
@@ -392,10 +396,14 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
     flags = (("acAttributeModeInvisible", invisible), ("acAttributeModeConstant", constant),
              ("acAttributeModePreset", preset), ("acAttributeModeLockPosition", lock_position))
     mode = sum(getattr(enums, flag) for flag, on in flags if on)
+    justification(justify, TEXT_JUSTIFY, "justify")
     doc = session.document(name)
     with session.edit(doc) as change:
-        att = doc.ModelSpace.AddAttribute(float(height), mode, prompt or label, point(position), label, default)
+        att = change.add(doc.ModelSpace.AddAttribute(float(height), mode, prompt or label, point(position), label,
+                                                     default))
+        extra = finish_text(doc, att, position, justify, style)
         info = place(change, att, layer)
+        info.update(extra, style=str(att.StyleName))
         info.update(tag=str(att.TagString), prompt=str(att.PromptString), default=str(att.TextString),
                     height=float(att.Height))
         return info

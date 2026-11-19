@@ -5,12 +5,64 @@ from __future__ import annotations
 from typing import Any
 
 from ..app import acad_tool
-from ..com import AcadError, doubles, point, rad, xyz
+from ..com import AcadError, doubles, enums, point, rad, xyz
 from ..session import Edit, session
 from .entities import details
 from .layers import find_layer
 
 Point = list[float]
+
+# Text justification: our names -> AutoCAD's AcAlignment constants (TEXT and ATTDEF).
+TEXT_JUSTIFY = {
+    "left": "acAlignmentLeft", "center": "acAlignmentCenter", "right": "acAlignmentRight",
+    "middle": "acAlignmentMiddle", "top_left": "acAlignmentTopLeft", "top_center": "acAlignmentTopCenter",
+    "top_right": "acAlignmentTopRight", "middle_left": "acAlignmentMiddleLeft",
+    "middle_center": "acAlignmentMiddleCenter", "middle_right": "acAlignmentMiddleRight",
+    "bottom_left": "acAlignmentBottomLeft", "bottom_center": "acAlignmentBottomCenter",
+    "bottom_right": "acAlignmentBottomRight",
+}
+# MTEXT attachment points -> AcAttachmentPoint constants.
+MTEXT_ATTACH = {key: "acAttachmentPoint" + "".join(w.title() for w in key.split("_"))
+                for key in ("top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right",
+                            "bottom_left", "bottom_center", "bottom_right")}
+# AutoCAD's own short forms, as typed at the TEXT command's Justify prompt.
+SHORT = {"l": "left", "c": "center", "r": "right", "m": "middle", "tl": "top_left", "tc": "top_center",
+         "tr": "top_right", "ml": "middle_left", "mc": "middle_center", "mr": "middle_right", "bl": "bottom_left",
+         "bc": "bottom_center", "br": "bottom_right"}
+
+
+def justification(value: str, table: dict[str, str], what: str) -> str:
+    """'Middle Center', 'middle-center' or 'MC' -> 'middle_center', checked against the table."""
+    key = "_".join(str(value).strip().lower().replace("-", " ").split())
+    key = SHORT.get(key, key)
+    if key not in table:
+        raise AcadError(f"{what} is one of {', '.join(table)} (or TL, MC, BR ...); got '{value}'.")
+    return key
+
+
+def text_style(doc: Any, wanted: str) -> str:
+    """The text style's name as the drawing spells it, or an error listing the styles there are."""
+    styles = doc.TextStyles
+    names = [str(styles.Item(i).Name) for i in range(styles.Count)]
+    for found in names:
+        if found.lower() == wanted.strip().lower():
+            return found
+    raise AcadError(f"No text style named '{wanted}'. The drawing has: {', '.join(names)} (add_text_style makes one).")
+
+
+def finish_text(doc: Any, ent: Any, position: Point, justify: str, style: str) -> dict:
+    """Style and justification for a new TEXT or ATTDEF; with a justification other than left,
+    position is the justification point (as at the TEXT command)."""
+    info: dict = {}
+    if style:
+        ent.StyleName = text_style(doc, style)
+    key = justification(justify, TEXT_JUSTIFY, "justify")
+    if key != "left":
+        ent.Alignment = getattr(enums, TEXT_JUSTIFY[key])
+        ent.TextAlignmentPoint = point(position)  # after Alignment: setting it first has no effect
+        info["justification_point"] = [round(v, 6) for v in xyz(position)]
+    info["justify"] = key
+    return info
 
 
 def place(change: Edit, ent: Any, layer: str) -> dict:
@@ -159,45 +211,68 @@ def draw_arc(center: Point, radius: float, start_angle: float, end_angle: float,
 
 @acad_tool()
 def add_text(text: str, position: Point, height: float, rotation: float = 0, layer: str = "",
-             name: str = "") -> dict:
-    """Add single-line text (TEXT) with its insertion point at position.
+             justify: str = "left", style: str = "", name: str = "") -> dict:
+    """Add single-line text (TEXT). position is where the justification point goes: the
+    left end of the baseline by default, the centre of the text with justify="middle_center",
+    so a centred label is one call.
 
     Args:
         text: the text.
-        position: insertion point [x, y].
-        height: text height in drawing units.
+        position: the justification point [x, y].
+        height: text height in drawing units (a style with a fixed height overrides it).
         rotation: degrees counter-clockwise.
         layer: layer to put it on (default: current layer).
+        justify: left (default), center, right, middle, top_left, top_center, top_right,
+            middle_left, middle_center, middle_right, bottom_left, bottom_center or
+            bottom_right; AutoCAD's short forms (TL, MC, BR ...) work too. center and right
+            sit on the baseline; middle is the middle of the text's height and width.
+        style: text style to use, e.g. one made with add_text_style (default: the current one).
         name: which open drawing (default: active).
     """
     if height <= 0:
         raise AcadError("height must be positive.")
+    justification(justify, TEXT_JUSTIFY, "justify")
     doc = session.document(name)
     with session.edit(doc) as change:
         ent = doc.ModelSpace.AddText(text, point(position), float(height))
         change.add(ent)
+        extra = finish_text(doc, ent, position, justify, style)
         if rotation:
             ent.Rotation = rad(rotation)
-        return place(change, ent, layer)
+        info = place(change, ent, layer)
+        info.update(extra)
+        return info
 
 
 @acad_tool()
 def add_mtext(text: str, position: Point, width: float, height: float = 0, layer: str = "",
-              name: str = "") -> dict:
-    """Add multiline text (MTEXT). Its top-left corner is at position.
+              attachment: str = "top_left", style: str = "", name: str = "") -> dict:
+    """Add multiline text (MTEXT). position is its attachment point: the top-left corner by
+    default, the centre with attachment="middle_center".
 
     Args:
         text: the text; use \\P for a new paragraph.
-        position: top-left corner [x, y].
+        position: the attachment point [x, y].
         width: wrapping width in drawing units (0 for no wrapping).
         height: text height (0 keeps the style's height).
         layer: layer to put it on (default: current layer).
+        attachment: top_left (default), top_center, top_right, middle_left, middle_center,
+            middle_right, bottom_left, bottom_center or bottom_right (or TL, MC, BR ...).
+        style: text style to use (default: the current one).
         name: which open drawing (default: active).
     """
+    key = justification(attachment, MTEXT_ATTACH, "attachment")
     doc = session.document(name)
     with session.edit(doc) as change:
         ent = doc.ModelSpace.AddMText(point(position), float(width), text)
         change.add(ent)
+        if style:
+            ent.StyleName = text_style(doc, style)
         if height > 0:
             ent.Height = float(height)
-        return place(change, ent, layer)
+        if key != "top_left":
+            ent.AttachmentPoint = getattr(enums, MTEXT_ATTACH[key])
+            ent.InsertionPoint = point(position)  # the attachment point stays at position
+        info = place(change, ent, layer)
+        info["attachment"] = key
+        return info

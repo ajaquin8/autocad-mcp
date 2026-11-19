@@ -1543,3 +1543,57 @@ def test_attribute_definition_modes_and_checks(fake_app):
     with pytest.raises(AcadError, match="No layer named"):
         blocks.add_attribute_definition("DATE", [0, 0], 0.125, layer="NOPE")
     assert fake_app.doc.ModelSpace.Count == 2  # the one on a missing layer was removed again
+
+
+# ---------- text justification and style (T5) ----------
+
+
+@pytest.fixture()
+def text_enums(monkeypatch):
+    names = ["Left", "Center", "Right", "Aligned", "Middle", "Fit", "TopLeft", "TopCenter", "TopRight", "MiddleLeft",
+             "MiddleCenter", "MiddleRight", "BottomLeft", "BottomCenter", "BottomRight"]
+    values = {f"acAlignment{n}": i for i, n in enumerate(names)}
+    corners = ["TopLeft", "TopCenter", "TopRight", "MiddleLeft", "MiddleCenter", "MiddleRight", "BottomLeft",
+               "BottomCenter", "BottomRight"]
+    values.update({f"acAttachmentPoint{n}": i for i, n in enumerate(corners, start=1)})
+    monkeypatch.setattr(com.enums, "_values", {**com.enums._values, **values})
+
+
+def test_add_text_centres_on_the_point_in_the_style_asked_for(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    out = draw.add_text("BATH", [5, 5], 0.125, justify="MC", style="notes-text")
+    ent = fake_app.doc.HandleToObject(out["handle"])
+    assert ent.Alignment == 10 and ent.TextAlignmentPoint == (5.0, 5.0, 0.0)
+    assert ent.StyleName == "NOTES-TEXT" and out["style"] == "NOTES-TEXT"
+    assert out["justify"] == "middle_center" and out["justification_point"] == [5.0, 5.0, 0.0]
+    plain = draw.add_text("NOTE", [0, 0], 0.125)
+    assert plain["justify"] == "left" and fake_app.doc.HandleToObject(plain["handle"]).Alignment == 0
+    assert draw.add_text("R", [1, 1], 0.1, justify="Bottom Right")["justify"] == "bottom_right"
+
+
+def test_add_text_refuses_unknown_justification_and_style_and_leaves_nothing(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    with pytest.raises(AcadError, match="justify is one of left, center"):
+        draw.add_text("X", [0, 0], 0.1, justify="fit")  # fit and aligned need two points: not offered
+    with pytest.raises(AcadError, match="No text style named 'ROMANS'.*Standard, NOTES-TEXT"):
+        draw.add_text("X", [0, 0], 0.1, style="ROMANS")
+    assert fake_app.doc.ModelSpace.Count == 0
+
+
+def test_add_mtext_attachment_and_style(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    out = draw.add_mtext(r"LIVING\PROOM", [10, 4], 3, attachment="middle_center", style="NOTES-TEXT")
+    ent = fake_app.doc.HandleToObject(out["handle"])
+    assert ent.AttachmentPoint == 5 and ent.InsertionPoint == (10.0, 4.0, 0.0)
+    assert out["attachment"] == "middle_center" and ent.StyleName == "NOTES-TEXT"
+    assert draw.add_mtext("A", [0, 0], 1)["attachment"] == "top_left"
+    with pytest.raises(AcadError, match="attachment is one of"):
+        draw.add_mtext("A", [0, 0], 1, attachment="middle")
+
+
+def test_attribute_definition_can_be_centred_in_a_style(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    info = blocks.add_attribute_definition("MARK", [2, 3], 0.1, justify="middle_center", style="NOTES-TEXT")
+    att = fake_app.doc.HandleToObject(info["handle"])
+    assert att.Alignment == 10 and att.TextAlignmentPoint == (2.0, 3.0, 0.0)
+    assert info["style"] == "NOTES-TEXT" and info["justify"] == "middle_center"
