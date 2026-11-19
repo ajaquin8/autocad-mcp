@@ -1804,3 +1804,97 @@ def test_define_block_can_replace_the_originals_with_a_reference(fake_app, monke
     assert a not in doc.space.items and b not in doc.space.items
     ref = doc.HandleToObject(out["reference"])
     assert ref.InsertionPoint == (5.0, 0.0, 0.0) and ref.EffectiveName == "Door tag"
+
+
+def _library(dbx):
+    """The library file: a dynamic Window (with a nested Sash), a Tag, and Title."""
+    lib = dbx.Blocks
+    sash = lib.new("Sash")
+    sash.add(_Item(sash))
+    window = lib.new("Window", dynamic={"Width": (36.0, (24.0, 36.0, 48.0)), "Swing": ("Left", ("Left", "Right"))})
+    window.add(_Item(window, "AcDbPolyline"))
+    window.add(_Ref(window, sash))
+    tag = lib.new("Tag")
+    tag.add(_Item(tag, "AcDbAttributeDefinition", TagString="MARK"))
+    lib.new("Title")
+    return lib
+
+
+def test_import_blocks_brings_new_definitions_in_whole_and_skips_existing(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    doc.Blocks.new("Tag")  # already in the drawing
+    out = block_library.import_blocks(path, ["window", "Tag"])
+    assert progids == ["ObjectDBX.AxDbDocument.26"] and dbx.opened == path  # read, not opened as a tab
+    assert out["imported"] == ["Window"] and out["skipped_existing"] == ["Tag"] and out["replaced"] == []
+    assert out["nested_brought_in"] == ["sash"]
+    window = doc.Blocks.Item("Window")
+    assert window.dynamic and [i.ObjectName for i in window.items] == ["AcDbPolyline", "AcDbBlockReference"]
+    assert doc.Blocks.Item("Tag").items == []  # left as it was
+    every = block_library.import_blocks(path)
+    assert every["imported"] == ["Title"] and set(every["skipped_existing"]) == {"Sash", "Window", "Tag"}
+
+
+def test_import_blocks_overwrite_switches_every_reference_and_keeps_its_values(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    old = doc.Blocks.new("Window", dynamic={"Width": (36.0, (24.0, 36.0)), "Swing": ("Left", ("Left", "Right")),
+                                            "Mullions": (1.0, ())})
+    old.add(_Item(old, "AcDbLine"))
+    placed = doc.Blocks.model.add(_Ref(doc.Blocks.model, old, InsertionPoint=(10, 20, 0)))
+    placed.props[0].Value, placed.props[1].Value = 24.0, "Right"
+    legend = doc.Blocks.new("Legend")
+    nested = legend.add(_Ref(legend, old))
+    nested.props[2].Value = 3.0
+    out = block_library.import_blocks(path, ["Window"], overwrite=True)
+    new = doc.Blocks.Item("Window")
+    assert out["replaced"] == ["Window"] and out["imported"] == [] and out["references_switched"] == 2
+    assert new is not old and placed.definition is new and nested.definition is new
+    assert placed.InsertionPoint == (10, 20, 0)
+    assert {p.PropertyName: p.Value for p in placed.props} == {"Width": 24.0, "Swing": "Right"}
+    assert out["values_not_restored"] == {h: ["Mullions"] for h in (placed.Handle, nested.Handle)}  # gone in the new
+    assert old not in doc.Blocks.defs and "old_definitions_left" not in out  # the old definition is gone
+    assert "regen" in doc.undo_log
+
+
+def test_import_blocks_puts_everything_back_when_it_fails(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    old = doc.Blocks.new("Window", dynamic={"Width": (36.0, (24.0, 36.0))})
+    placed = doc.Blocks.model.add(_Ref(doc.Blocks.model, old))
+    placed.props[0].Value = 24.0
+
+    def regen_fails(which):
+        raise _com_error(-2147467259)
+    doc.Regen = regen_fails
+    with pytest.raises(pywintypes.com_error):
+        block_library.import_blocks(path, ["Window"], overwrite=True)
+    assert old.Name == "Window" and doc.Blocks.Item("Window") is old and placed.definition is old
+    assert placed.props[0].Value == 24.0
+    assert [d.Name for d in doc.Blocks.defs] == ["*Model_Space", "Window"]  # copies and nested Sash removed
+
+
+def test_import_blocks_checks_before_touching_anything(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    _library(dbx)
+    with pytest.raises(AcadError, match="no block 'Door'.*It has: Sash, Tag, Title, Window"):
+        block_library.import_blocks(path, ["Door"])
+    with pytest.raises(AcadError, match="Not found or not a drawing"):
+        block_library.import_blocks(str(tmp_path / "missing.dwg"))
+    with pytest.raises(AcadError, match="Not found or not a drawing"):
+        block_library.import_blocks(str(tmp_path))
+    session.owned.clear()
+    with pytest.raises(AcadError, match="locked"):
+        block_library.import_blocks(path)
+    assert dbx.Blocks.copies == 0 and [d.Name for d in doc.Blocks.defs] == ["*Model_Space"]
+
+
+def test_import_blocks_reads_an_open_library_from_autocad(fake_app, monkeypatch, tmp_path):
+    doc, dbx, path, progids = _library_drawing(fake_app, monkeypatch, tmp_path)
+    opened = FakeDoc("Library.dwg", path)
+    opened.Blocks = _Table()
+    opened.Blocks.new("Title")
+    opened.CopyObjects = opened.Blocks.CopyObjects
+    fake_app.Documents.docs.append(opened)
+    out = block_library.import_blocks(path)
+    assert out["imported"] == ["Title"] and out["source"] == "'Library.dwg' (open in AutoCAD)" and progids == []

@@ -40,6 +40,10 @@ Templates and sheets: add_text_style, add_dimension_style and add_multileader_st
 styles (give the dimension and multileader styles the plot scale factor); set_page_setup
 sets a sheet's paper size; insert_block with layout= puts a title block on a sheet.
 
+Block libraries: define_block makes (or redefines) a block from objects and a base point;
+import_blocks brings definitions in from a library drawing, and with overwrite=True
+replaces same-named ones and switches their references.
+
 If AutoCAD keeps rejecting calls because a command or prompt the server started
 is still open in a server-created drawing, cancel_command cancels it there. It
 never acts in the user's drawings; if the user is busy, ask them instead. When a
