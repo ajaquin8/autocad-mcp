@@ -92,7 +92,8 @@ def new_drawing(template: str = "") -> dict:
 @acad_tool()
 def open_drawing(path: str, read_only: bool = False) -> dict:
     """Open a drawing file. It stays locked for edits until the user asks you to
-    change it (allow_edit_document). A drawing that is already open is returned as it is.
+    change it (allow_edit_document). A drawing that is already open is returned as it is;
+    activate_document switches to it.
 
     Args:
         path: full path of the .dwg.
@@ -100,7 +101,7 @@ def open_drawing(path: str, read_only: bool = False) -> dict:
     """
     for doc in session.documents():
         if os.path.normcase(str(doc.FullName or "")) == os.path.normcase(path):
-            return {**session.describe(doc), "note": "already open; left as it is"}
+            return {**session.describe(doc), "note": "already open; left as it is (activate_document switches to it)"}
     if not os.path.exists(path):
         raise AcadError(f"File not found: {path}")
     if session.documents():
@@ -116,6 +117,35 @@ def open_drawing(path: str, read_only: bool = False) -> dict:
     # lookup right after Open failed although the drawing then opened).
     doc = session.settle(answering, f"opening '{os.path.basename(path)}'")
     return session.describe(doc)
+
+
+@acad_tool()
+def activate_document(name: str) -> dict:
+    """Make an open drawing the active one, as clicking its tab would. Commands
+    (run_command, the Block Editor tools), zoom_extents, capture_view and viewports work in
+    the active drawing only. Works for any open drawing and changes nothing in it, but it
+    changes what the user sees: only switch while the user is not working in AutoCAD, or
+    when they asked for it. Refused while a command, prompt or dialog is active.
+
+    Args:
+        name: name, file name or full path of the open drawing.
+    """
+    doc = session.find_document(name)
+    key = doc_key(doc)
+    active = session.document()
+    if doc_key(active) == key:
+        return {**session.describe(doc), "active": True, "note": "already the active drawing"}
+    session.require_idle(active)  # never switch tabs in the middle of the user's command
+    busy = int(doc.GetVariable("CMDACTIVE"))
+    if busy:
+        raise AcadError(f"'{doc.Name}' has a command or dialog active (CMDACTIVE={busy}); not switching to it.")
+    doc.Activate()
+    # Switching can keep AutoCAD busy for a moment, like opening a drawing: wait until it answers.
+    now = session.settle(lambda: doc_key(session.app.ActiveDocument), f"switching to '{doc.Name}'")
+    if now != key:
+        raise AcadError(f"AutoCAD did not switch to '{doc.Name}' (the active drawing is still "
+                        f"'{session.app.ActiveDocument.Name}'). Ask the user to click its tab.")
+    return {**session.describe(doc), "active": True}
 
 
 @acad_tool()
