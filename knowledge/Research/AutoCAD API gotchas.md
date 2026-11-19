@@ -180,3 +180,9 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **inferred:** `(ssget "_X" ...)` selects in the whole drawing database (model space and every layout), not in the block being edited, so it is the wrong tool for removing objects inside the Block Editor. `(ssget "_C" p1 p2 filter)` selects in the current space and only what is on screen.
 - **inferred:** the Block Editor gives a block's objects new handles; handles read outside it name other objects. An object's `OwnerID` equal to a layout's `Block.ObjectID` means it is in model space or on a sheet.
 - **unresolved:** whether two Ctrl+C sent while an expression is stuck inside `(command ...)` makes its `*error*` handler run (UNDO Back, transcript finished), as `run_command` now expects. Check in the next live batch.
+
+## 2026-11-18: block definitions by CopyObjects (define_block, import_blocks; not live-verified)
+- **documented (2027 ActiveX reference):** `CopyObjects(Objects, Owner)` deep-clones; all objects must have one owner, belonging to the calling document or database; it must not run while a collection is being iterated. `ObjectDBX.AxDbDocument.<release>` (26 for AutoCAD 2027) reads a DWG in memory. `BlockReference.Name` can be set to another existing definition. `Block.Origin` is the base point.
+- **unresolved:** whether CopyObjects accepts a `VT_ARRAY | VT_DISPATCH` VARIANT built from late-bound proxies (`com.objects`).
+- **unresolved:** whether `CopyObjects` from an ObjectDBX document with the target's `Blocks` collection as owner keeps dynamic block data (the usual VBA idiom says it does).
+- **unresolved:** whether setting `Name` on a dynamic reference (drawn by an anonymous `*U` block) switches it cleanly, and whether the renamed old dynamic definition can be deleted while its `*U` copies exist (if not, `import_blocks` reports it for purging).

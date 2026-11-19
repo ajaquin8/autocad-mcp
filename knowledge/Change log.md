@@ -306,3 +306,10 @@ Writer: Claude Code, on the user's request to work through the improvement list 
 - **B3:** a `run_command` expression that does not finish in time is cancelled by the server (not while a dialog shows), and the error lists the prompts it got through and whether AutoCAD answers again.
 - Tests: 9 new offline tests (128 in total); the five checks of `scripts\check.ps1` pass (run one by one: the script itself is blocked by this PC's PowerShell execution policy). **Nothing here is live-verified**; B1 and B2 are fixes for an inferred cause.
 - Updated: [[Research/AutoCAD API gotchas]], Tool reference.
+
+## 2026-11-18: define_block and import_blocks (T2, T3)
+Writer: Claude Code, on the user's go ("Continue to T2, T3"), step 2 of the improvement list. Branch `feat/block-library` (from `main`; separate from `fix/activate-and-hangs`), one commit per item.
+- **T2:** new tool `define_block`: copies objects (any one space) into a new or existing definition with `CopyObjects`, base point as the insertion point. Redefining keeps a backup copy for rollback; dynamic blocks are refused. Originals kept, deleted or replaced by a reference.
+- **T3:** new tool `import_blocks`: reads a library drawing with ObjectDBX (or the open document) and deep-clones the chosen definitions. `overwrite=True` renames the old definition aside, clones the new one, switches every reference to it (keeping placement, attributes and dynamic property values where still allowed), then deletes the old definition.
+- New module `autocad_mcp/tools/block_library.py`; `com.objects()` builds the VARIANT array of objects CopyObjects takes.
+- Tests: 9 new offline tests with a fake block table and deep copy; the five checks pass. **Not live-verified**; see the open questions in [[Research/AutoCAD API gotchas]].
