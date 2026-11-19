@@ -340,6 +340,12 @@ class Session:
             raise AcadError("No drawing is open in AutoCAD (only the Start tab).")
         return self.app.ActiveDocument
 
+    def require_active(self, doc: Any, what: str) -> None:
+        """Refuse unless doc is AutoCAD's active drawing; `what` ends 'AutoCAD only ... in the active one'."""
+        if doc_key(self.app.ActiveDocument) != doc_key(doc):
+            raise AcadError(f"'{doc.Name}' is not the active drawing; {what}. Call activate_document first "
+                            "(only while the user is not working in AutoCAD), or ask the user to switch to it.")
+
     # ---------- edit guard ----------
 
     def is_editable(self, doc: Any) -> bool:
