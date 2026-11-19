@@ -2238,3 +2238,44 @@ def test_visibility_tools_follow_the_live_prompts(fake_app, monkeypatch):
         with pytest.raises(ValueError):
             bad()
     assert len(runs.calls) == 7
+
+
+def test_flip_and_rotation_parameters_follow_the_recorded_prompts(fake_app, monkeypatch):
+    # T8: flip's Label also asks for the two values, rotation's for the label (live 2026-11-18, -03).
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    flip = block_authoring.add_flip_parameter("Hinge side", [0, -12], [60, -12], [30, -16])
+    turn = block_authoring.add_rotation_parameter("Angle", [30, 42], 10, [30, 56], value_list=[0, 90, 180])
+    (_, flip_in, _), (_, turn_in, _) = runs.calls
+    assert flip_in == ["_F", "_L", "Hinge side", "Not flipped", "Flipped", [0, -12], [60, -12], [30, -16]]
+    assert flip["pick_point"] == [15.0, -12.0]
+    assert turn_in == ["_R", "_L", "Angle", "_V", "_L", "0,90,180", [30, 42], 10.0, 0.0, [30, 56], "1"]
+    assert math.isclose(math.dist(turn["pick_point"], [30, 42]), 10, abs_tol=1e-5)
+    for bad in [lambda: block_authoring.add_flip_parameter("F", [0, 0], [0, 0], [1, 1]),
+                lambda: block_authoring.add_rotation_parameter("A", [0, 0], 0, [1, 1]),
+                lambda: block_authoring.add_rotation_parameter("A", [0, 0], 1, [1, 1], grips=2)]:
+        with pytest.raises(ValueError):
+            bad()
+
+
+def test_add_action_answers_per_kind(fake_app, monkeypatch):
+    # T8: move and scale recorded live 2026-11-18 (-03); flip and rotate ask no action type.
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    doc.variables["BACTIONBARMODE"] = 1
+    box = {"crossing": [[24, 36], [36, 48]]}
+    block_authoring.add_action("move", [15, -6], box, offset=90, multiplier=0.5, location=[35, -20])
+    block_authoring.add_action("scale", [15, -6], box, location=[20, -20])
+    block_authoring.add_action("flip", [15, -12], {"handles": ["8A"]})
+    block_authoring.add_action("rotate", [37, 49], box, location=[45, 50])
+    assert [i for _, i, _ in runs.calls] == [
+        [[15, -6], "_M", "_S", box, "", "_M", 0.5, "_O", 90.0, [35, -20]],
+        [[15, -6], "_S", box, "", [20, -20]],
+        [[15, -12], {"handles": ["8A"]}, "", [15, -12]],
+        [[37, 49], box, "", [45, 50]],
+    ]
+    assert all(c == "BACTION" for c, _, _ in runs.calls) and doc.variables["BACTIONBARMODE"] == 1
+    for bad in [lambda: block_authoring.add_action("array", [0, 0], box),
+                lambda: block_authoring.add_action("scale", [0, 0], box, offset=90),
+                lambda: block_authoring.add_action("move", [0, 0], box, end="middle")]:
+        with pytest.raises(ValueError):
+            bad()

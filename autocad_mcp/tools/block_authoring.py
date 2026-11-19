@@ -1,23 +1,34 @@
-"""More Block Editor tools: list what is in the editor (T10), visibility parameters and states (T6).
+"""More Block Editor tools: list what is in the editor (T10), visibility parameters and states (T6),
+flip and rotation parameters, and move, scale, flip and rotate actions (T8).
 
 Built on run_command like tools/block_editor.py. The prompt orders were recorded live on 2026-11-18
-(AMCP-LIVE-20261118-02/03, AutoCAD 2027).
+(AMCP-LIVE-20261118-03, AutoCAD 2027, BACTIONBARMODE 0), except where a comment says "not seen yet".
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pywintypes
 
 from ..app import acad_tool
-from ..com import rounded
+from ..com import rounded, xyz
 from ..session import session
-from .block_editor import require_editor, run_checked, selection_input
+from .block_editor import (
+    PARAMETER_POINT,
+    location_inputs,
+    require_editor,
+    run_action,
+    run_checked,
+    selection_input,
+    value_set_inputs,
+)
 from .draw import Point
 
 KINDS = ("geometry", "parameters", "actions", "grips")
 NEW_STATE = {"current": "_C", "show_all": "_S", "hide_all": "_H"}  # [Hide all/Show all/Current visibility]
+ACTIONS = ("move", "scale", "flip", "rotate")
 
 
 def kind_of(object_name: str) -> str:
@@ -147,3 +158,115 @@ def set_object_visibility(select: dict, visible: bool, all_states: bool = False,
     result = run_checked(doc, f"{'Showing' if visible else 'Hiding'} objects", command,
                          [answer, "", "_A" if all_states else "_C"])
     return {"visible": visible, "all_states": all_states, "steps": result["steps"]}
+
+
+# ---------- flip and rotation parameters, actions (T8) ----------
+
+
+@acad_tool()
+def add_flip_parameter(label: str, base: Point, end: Point, label_location: Point, unflipped: str = "Not flipped",
+                       flipped: str = "Flipped", name: str = "") -> dict:
+    """Add a flip parameter in the open Block Editor (BPARAMETER Flip): a reflection line from
+    base to end that objects flip about, with a property users see as `label`. Its grip sits at
+    base. Returns "pick_point", a point on the line, for add_action(kind="flip").
+
+    Args:
+        label: property name, e.g. "Hinge side".
+        base, end: the reflection line [x, y].
+        label_location: where the label goes [x, y].
+        unflipped, flipped: the property's two values (default "Not flipped" / "Flipped").
+        name: which drawing; it must be the active one (default: active).
+    """
+    (x1, y1, _), (x2, y2, _) = xyz(base), xyz(end)
+    if math.isclose(x1, x2) and math.isclose(y1, y2):
+        raise ValueError("base and end must differ.")
+    doc = session.document(name)
+    require_editor(doc, True)
+    # Label asks for the label, then the unflipped and flipped values (live 2026-11-18); then the line and the
+    # label location (documented; not seen to the end yet).
+    result = run_checked(doc, f"Adding the flip parameter '{label}'", "BPARAMETER",
+                         ["_F", "_L", label, unflipped, flipped, list(base), list(end), list(label_location)])
+    pick = rounded([x1 + 0.25 * (x2 - x1), y1 + 0.25 * (y2 - y1)])
+    return {"label": label, "pick_point": pick, "steps": result["steps"]}
+
+
+@acad_tool()
+def add_rotation_parameter(label: str, base: Point, radius: float, label_location: Point, default_angle: float = 0,
+                           grips: int = 1, value_list: list[float] | None = None, name: str = "") -> dict:
+    """Add a rotation parameter in the open Block Editor (BPARAMETER Rotation): an angle property
+    users see as `label`, turning about base. It is drawn as a circle of the given radius.
+    Returns "pick_point", a point on that circle, for add_action(kind="rotate").
+
+    Args:
+        label: property name, e.g. "Angle".
+        base: the point objects rotate about [x, y].
+        radius: the circle's radius (where the grip sits).
+        label_location: where the label goes [x, y].
+        default_angle: degrees where the grip starts (default 0).
+        grips: 0 or 1 (default 1).
+        value_list: allowed angles in degrees, e.g. [0, 90, 180, 270] (default: any).
+        name: which drawing; it must be the active one (default: active).
+    """
+    if radius <= 0:
+        raise ValueError("radius must be positive.")
+    if grips not in (0, 1):
+        raise ValueError("grips is 0 or 1.")
+    values = value_set_inputs(value_list, None)
+    doc = session.document(name)
+    require_editor(doc, True)
+    # Label, base point, radius, default angle, label location (live 2026-11-18); the answer after the label
+    # location (the number of grips) and the angle value set are not seen yet.
+    result = run_checked(doc, f"Adding the rotation parameter '{label}'", "BPARAMETER",
+                         ["_R", "_L", label, *values, list(base), float(radius), float(default_angle),
+                          list(label_location), str(grips)])
+    bx, by, _ = xyz(base)
+    angle = math.radians(default_angle + 135)  # away from the grip
+    pick = rounded([bx + radius * math.cos(angle), by + radius * math.sin(angle)])
+    return {"label": label, "pick_point": pick, "steps": result["steps"]}
+
+
+def action_inputs(kind: str, parameter_pick: Point, select: dict, end: str, multiplier: float | None,
+                  offset: float | None, location: Point | None) -> list:
+    """BACTION answers per action (live 2026-11-18 for move and scale; flip and rotate not seen yet:
+    their parameters allow one action each, so no action type is asked)."""
+    if kind not in ACTIONS:
+        raise ValueError(f"kind is one of {', '.join(ACTIONS)}.")
+    if (multiplier not in (None, 1) or offset) and kind != "move":
+        raise ValueError("multiplier and offset are for move actions (stretches take them in add_stretch_action).")
+    pick = list(parameter_pick)
+    where = list(location if location is not None else parameter_pick)
+    chosen = [selection_input(select, [], ""), ""]
+    if kind == "move":
+        if end not in PARAMETER_POINT:
+            raise ValueError('end is "second" or "start".')
+        return [pick, "_M", PARAMETER_POINT[end], *chosen, *location_inputs(multiplier, offset, where)]
+    if kind == "scale":
+        return [pick, "_S", *chosen, where]
+    return [pick, *chosen, where]
+
+
+@acad_tool()
+def add_action(kind: str, parameter_pick: Point, select: dict, end: str = "second", multiplier: float | None = None,
+               offset: float | None = None, location: Point | None = None, name: str = "") -> dict:
+    """Add a move, scale, flip or rotate action in the open Block Editor (BACTION) to the parameter
+    drawn through parameter_pick (pick_point from the parameter tools). Stretches have their own
+    tool (add_stretch_action). The view is widened first so every pick is on screen.
+
+    move: with a linear, polar, XY or point parameter; `end` picks the parameter point that drives
+    it, and multiplier / offset (degrees) work as for stretches. scale: with a linear, polar or XY
+    parameter. flip: with a flip parameter. rotate: with a rotation parameter.
+
+    Args:
+        kind: "move", "scale", "flip" or "rotate".
+        parameter_pick: [x, y] on the parameter.
+        select: the objects: {"crossing": [p1, p2]}, {"window": [p1, p2]} or {"handles": [...]}
+            (from list_block_editor_objects).
+        end: for move: "second" (default) or "start".
+        multiplier: for move: distance multiplier, e.g. 0.5 (default 1).
+        offset: for move: angle offset in degrees (default 0).
+        location: where the action's badge goes (default: parameter_pick).
+        name: which drawing; it must be the active one (default: active).
+    """
+    inputs = action_inputs(kind, parameter_pick, select, end, multiplier, offset, location)
+    result = run_action(session.document(name), f"Adding the {kind} action", inputs, select)
+    return {"kind": kind, **result}
