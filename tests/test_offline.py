@@ -1095,6 +1095,7 @@ def command_line(fake_app, monkeypatch, tmp_path):
     monkeypatch.setattr(commands, "RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(commands, "START_WAIT", 0.2)
     monkeypatch.setattr(commands, "CANCEL_WAIT", 0.2)
+    monkeypatch.setattr(commands, "AFTER_WAIT", 0)
     monkeypatch.setattr(commands, "POLL", 0.01)
     monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
     monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: False)
@@ -1171,6 +1172,23 @@ def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
     fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t1"], still_active=True, doc=fake_app.doc))
     out = commands.run(fake_app.doc, "LINE")
     assert out["cancelled_afterwards"] and fake.sent[-1] == "\x03\x03"
+
+
+def test_run_command_looks_again_for_a_prompt_that_comes_back(fake_app, command_line):
+    # Live 2026-11-18 (AMCP-LIVE-20261118-02): SELECT in the Block Editor ended, AutoCAD answered, and a moment
+    # later it was waiting at a prompt again; every later call was refused until cancel_command.
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tSelect objects:", "P\tSelect objects:", "D\t0"]))
+    real, calls = fake_app.doc.GetVariable, {"n": 0}
+
+    def comes_back(var):
+        if var == "CMDACTIVE":
+            calls["n"] += 1
+            return 1 if calls["n"] >= 3 else 0  # idle before sending and at the first look, waiting at the second
+        return real(var)
+    fake_app.doc.GetVariable = comes_back
+    out = commands.run(fake_app.doc, "SELECT", [{"handle": "8A"}], undo_on_failure=False)
+    assert out["completed"] and out["cancelled_afterwards"] and fake.sent[-1] == "\x03\x03"
+    assert "waiting at a prompt again" in out["problem"]
 
 
 def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypatch):
