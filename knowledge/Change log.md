@@ -297,3 +297,9 @@ Writer: Claude, in a Claude desktop session, on Alex's go ("Lets do it"). Branch
 - Tests: 1 new offline test (119 in total); `scripts\check.ps1` passes. Live: 28 of 28 with the repo code. **Not verified** through an installed bundle.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], Tool reference.
 - 2026-11-13: version 0.1.8 in `pyproject.toml` and `app.py`, on Alex's go ("Okay lets push it"), so a bundle with this change can be told apart from the installed 0.1.7. Still **not verified** through an installed bundle.
+
+## 2026-11-18: live check of the improvement list fixes (AMCP-LIVE-20261118-01)
+Writer: Claude Code, on the user's go ("Saved, go").
+- Ran `tests/live/improvements_check.py` (added here) from a local branch merging the three fix branches: 70 of 72 checks ([[Sources/2026-11-18 Improvement list live check]]).
+- Fixed the two failures the same day, each on its own branch: `define_block` reported the wrong object count (`feat/block-library`); the B2 owner pre-check did not work inside the Block Editor and was replaced by a clear error from what AutoCAD does (`fix/activate-and-hangs`). Both offline-tested only.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
