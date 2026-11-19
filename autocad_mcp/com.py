@@ -76,6 +76,12 @@ def point(value: Sequence[float]) -> Any:
     return doubles(xyz(value))
 
 
+def objects(items: Sequence[Any]) -> Any:
+    """A VARIANT array of COM objects, the type CopyObjects expects for its Objects argument."""
+    return win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH,
+                                   [getattr(o, "_oleobj_", o) for o in items])
+
+
 def rounded(values: Sequence[float], places: int = 6) -> list[float]:
     return [round(float(v), places) for v in values]
 
