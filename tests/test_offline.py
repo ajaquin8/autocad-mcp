@@ -2209,3 +2209,32 @@ def test_list_block_editor_objects_reads_the_editor_space(fake_app, monkeypatch)
     doc.variables["BLOCKEDITOR"] = 0
     with pytest.raises(AcadError, match="not open"):
         block_authoring.list_block_editor_objects()
+
+
+def test_visibility_tools_follow_the_live_prompts(fake_app, monkeypatch):
+    # T6, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03).
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    block_authoring.add_visibility_parameter([80, 90], "Size")
+    block_authoring.visibility_state("new", "36 in")
+    block_authoring.visibility_state("new", "48 in", new_state_shows="show_all")
+    block_authoring.visibility_state("set", "36 in")
+    block_authoring.visibility_state("delete", "48 in")
+    block_authoring.set_object_visibility({"crossing": [[24, 36], [36, 48]]}, visible=False)
+    block_authoring.set_object_visibility({"handles": ["8A"]}, visible=True, all_states=True)
+    assert [(c, i) for c, i, _ in runs.calls] == [
+        ("BPARAMETER", ["_V", "_L", "Size", [80, 90], "1"]),
+        ("-BVSTATE", ["_N", "36 in", "_C"]),
+        ("-BVSTATE", ["_N", "48 in", "_S"]),
+        ("-BVSTATE", ["_S", "36 in"]),
+        ("-BVSTATE", ["_D", "48 in"]),
+        ("BVHIDE", [{"crossing": [[24, 36], [36, 48]]}, "", "_C"]),
+        ("BVSHOW", [{"handles": ["8A"]}, "", "_A"]),
+    ]
+    for bad in [lambda: block_authoring.visibility_state("rename", "x"),
+                lambda: block_authoring.visibility_state("new", " "),
+                lambda: block_authoring.visibility_state("new", "x", new_state_shows="some"),
+                lambda: block_authoring.add_visibility_parameter([0, 0], grips=2),
+                lambda: block_authoring.set_object_visibility({"crossing": [[0, 0]]}, visible=True)]:
+        with pytest.raises(ValueError):
+            bad()
+    assert len(runs.calls) == 7
