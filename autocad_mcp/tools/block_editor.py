@@ -45,7 +45,7 @@ def require_block(doc: Any, block: str) -> Any:
 
 
 def failed(what: str, result: dict) -> AcadError:
-    steps = "; ".join(f"{s['sent']} -> {s['lastprompt']!r}" for s in result.get("steps", []))
+    steps = "; ".join(commands.step_text(s) for s in result.get("steps", []))
     back = " The drawing was put back to how it was." if result.get("undone") else ""
     return AcadError(f"{what} failed: {result.get('problem') or 'it did not complete'}{back} Steps: {steps}")
 

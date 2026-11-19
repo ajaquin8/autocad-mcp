@@ -335,3 +335,9 @@ Writer: Claude Code, on the user's go ("Continue to T6–T10", then "Saved, go" 
 - **T8:** `add_flip_parameter`, `add_rotation_parameter`, `add_action` (move, scale, flip, rotate). New module `autocad_mcp/tools/block_authoring.py`.
 - **run_command:** looks a second time for a prompt left open after a command (seen once after `SELECT`).
 - Tests: 150 offline; live 41 of 41 on the last verification run (AMCP-LIVE-20261118-05).
+
+## 2026-11-19: shorter run_command results; each answer paired with its prompt (E1, E2)
+Writer: Claude Code, on the user's go ("Start E1, E2"), step 5 of the improvement list. Branch `feat/run-command-results`, one commit per item.
+- **E2:** each step of a `run_command` result gives `prompt` (the prompt that answer replied to, its echo removed) and `message` (what AutoCAD printed after it, e.g. `1 found`); `prompt` is null when an expected echo is missing, and `answered_as` flags a point taken as typed text. `left_waiting_at` is only set when AutoCAD printed the open prompt. The fixed note about `LASTPROMPT` lagging is gone. Why: [[Research/AutoCAD API gotchas]] (2026-11-19).
+- **E1:** `run_command(compact=True)` returns only completed, problem, the inputs used, the last prompt and AutoCAD's other lines; the last 8 steps only if the command did not complete. Default unchanged (every step). The count of pieces sent to AutoCAD is now `pieces_sent` (was `messages`).
+- Tests: 3 new offline tests (153 in the whole suite); the parser was also run over every transcript of AMCP-LIVE-20261118-03 and paired each answer correctly. **Not live-verified**, including the line logged after the final cancel.
