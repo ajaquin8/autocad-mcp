@@ -319,3 +319,9 @@ Writer: Claude Code, on the user's go ("Continue to T5, B6"), step 3 of the impr
 - **T5:** `add_text` and `add_attribute_definition` take `justify` (13 justifications, or TL, MC, BR ...) and `style`; `add_mtext` takes `attachment` and `style`. With a justification, `position` is the justification point. Unknown styles are refused with the drawing's list.
 - **B6:** model space stays the default. Drawing, text, dimension and leader tools, `add_attribute_definition` and `insert_block` report `space`; with a sheet tab active (paper space current) the result notes that the object went into model space. New optional `layout=` on those tools draws on a sheet.
 - Tests: 6 new offline tests (125 in total); the five checks pass. **Not live-verified.**
+
+## 2026-11-18: live check of the improvement list fixes (AMCP-LIVE-20261118-01)
+Writer: Claude Code, on the user's go ("Saved, go").
+- Ran `tests/live/improvements_check.py` (added here) from a local branch merging the three fix branches: 70 of 72 checks ([[Sources/2026-11-18 Improvement list live check]]).
+- Fixed the two failures the same day, each on its own branch: `define_block` reported the wrong object count (`feat/block-library`); the B2 owner pre-check did not work inside the Block Editor and was replaced by a clear error from what AutoCAD does (`fix/activate-and-hangs`). Both offline-tested only.
+- Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].

@@ -191,3 +191,11 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **documented / inferred:** a TEXT or ATTDEF is justified by setting `Alignment` (AcAlignment) and then `TextAlignmentPoint`; `InsertionPoint` is then computed by AutoCAD. Fit and Aligned need two points and are left out of `justify`.
 - **unresolved:** whether setting an MTEXT's `AttachmentPoint` keeps `InsertionPoint` where it was (`add_mtext` sets it again afterwards to be sure).
 - **user-reported (B6):** with a sheet tab active, objects added to `ModelSpace` are not in the current space, so `-BLOCK` refuses them ("not in current space").
+
+## 2026-11-18: live results ([[Sources/2026-11-18 Improvement list live check]])
+- **observed:** `Document.CopyObjects` called through late binding returned a pair (the copies and the IDPairs output), so `len()` of the result was 2 whatever was copied. Count the target instead.
+- **verified:** inside the Block Editor, `(handent "<handle of a model-space object>")` gives nothing; a selection built from it is empty. `HandleToObject` over COM still found the object, and its `OwnerID` did not match any layout's `Block.ObjectID` there (**unresolved:** why).
+- **verified:** `(ssget "_C" p1 p2 filter)` as one selection answer works at BACTION's "Select objects:" in the Block Editor, also for a `multiplier=0.5` stretch; the badge far off screen was fine once the view was widened.
+- **verified:** `CopyObjects` from an ObjectDBX document (`ObjectDBX.AxDbDocument.26`) with the target's `Blocks` as owner brings a dynamic block in whole; renaming a dynamic definition, setting `Name` on its references (also nested ones) and deleting the old definition all worked, and the dynamic property value was set again.
+- **verified:** `Alignment` then `TextAlignmentPoint` justifies TEXT and ATTDEF; setting an MTEXT's `AttachmentPoint` and its `InsertionPoint` again keeps it at the point.
+- **verified:** `Document.Activate()` switches the active drawing; `ActiveDocument` follows at once.
