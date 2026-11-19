@@ -38,6 +38,8 @@ get_entity, move_entities, change_properties and delete_entities.
 run_command, the Block Editor tools, zoom_extents and capture_view work in the active
 drawing only; activate_document switches to another open drawing (only while the user
 is not working in AutoCAD).
+Drawing, text and dimension tools put objects in model space unless layout= names a
+sheet; every result says which "space" was used.
 
 Templates and sheets: add_text_style, add_dimension_style and add_multileader_style make
 styles (give the dimension and multileader styles the plot scale factor); set_page_setup

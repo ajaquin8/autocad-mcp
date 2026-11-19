@@ -7,14 +7,15 @@ import math
 from ..app import acad_tool
 from ..com import AcadError, doubles, point, rad, xyz
 from ..session import session
-from .draw import Point, place
+from .draw import Point, drawing_space, place
 
 DIMENSION_KINDS = {"aligned": None, "horizontal": 0.0, "vertical": 90.0, "rotated": None}
 
 
 @acad_tool()
 def add_dimension(first: Point, second: Point, text_position: Point, kind: str = "aligned",
-                  rotation: float = 0, text_override: str = "", layer: str = "", name: str = "") -> dict:
+                  rotation: float = 0, text_override: str = "", layer: str = "", layout: str = "",
+                  name: str = "") -> dict:
     """Add a linear dimension between two points, using the current dimension style.
 
     When the text does not fit between the extension lines, AutoCAD puts it outside, beyond
@@ -28,13 +29,14 @@ def add_dimension(first: Point, second: Point, text_position: Point, kind: str =
         rotation: degrees, only for kind=rotated.
         text_override: replace the measured text, e.g. "<> TYP" keeps the value and adds TYP.
         layer: layer to put it on (default: current layer).
+        layout: a sheet's layout name to put it on its paper space (default: model space).
         name: which open drawing (default: active).
     """
     kind = kind.lower()
     if kind not in DIMENSION_KINDS:
         raise AcadError(f"kind must be one of {', '.join(DIMENSION_KINDS)}.")
     doc = session.document(name)
-    space = doc.ModelSpace
+    space, where = drawing_space(doc, layout)
     with session.edit(doc) as change:
         if kind == "aligned":
             dim = space.AddDimAligned(point(first), point(second), point(text_position))
@@ -44,12 +46,12 @@ def add_dimension(first: Point, second: Point, text_position: Point, kind: str =
         change.add(dim)
         if text_override:
             dim.TextOverride = text_override
-        return place(change, dim, layer)
+        return place(change, dim, layer, where)
 
 
 @acad_tool()
 def add_radial_dimension(center: Point, point_on_curve: Point, kind: str = "diameter", leader_length: float = 0,
-                         text_override: str = "", layer: str = "", name: str = "") -> dict:
+                         text_override: str = "", layer: str = "", layout: str = "", name: str = "") -> dict:
     """Dimension a circle or arc by its diameter (Ø) or radius (R), using the current dimension style.
 
     Args:
@@ -60,6 +62,7 @@ def add_radial_dimension(center: Point, point_on_curve: Point, kind: str = "diam
         leader_length: how far the text sits outside the curve, in drawing units (0 keeps it close).
         text_override: replace the measured text, e.g. "<> THRU, 4 PLACES" keeps the value and adds to it.
         layer: layer to put it on (default: current layer).
+        layout: a sheet's layout name to put it on its paper space (default: model space).
         name: which open drawing (default: active).
     """
     kind = kind.lower()
@@ -70,20 +73,21 @@ def add_radial_dimension(center: Point, point_on_curve: Point, kind: str = "diam
     if math.isclose(cx, px) and math.isclose(cy, py):
         raise AcadError("point_on_curve must be on the curve, not at the centre.")
     doc = session.document(name)
+    space, where = drawing_space(doc, layout)
     with session.edit(doc) as change:
         if kind == "radius":
-            dim = doc.ModelSpace.AddDimRadial(point(center), point(point_on_curve), float(leader_length))
+            dim = space.AddDimRadial(point(center), point(point_on_curve), float(leader_length))
         else:
             far = [2 * cx - px, 2 * cy - py, 2 * cz - pz]
-            dim = doc.ModelSpace.AddDimDiametric(point(point_on_curve), point(far), float(leader_length))
+            dim = space.AddDimDiametric(point(point_on_curve), point(far), float(leader_length))
         change.add(dim)
         if text_override:
             dim.TextOverride = text_override
-        return place(change, dim, layer)
+        return place(change, dim, layer, where)
 
 
 @acad_tool()
-def add_leader(points: list[Point], text: str, layer: str = "", name: str = "") -> dict:
+def add_leader(points: list[Point], text: str, layer: str = "", layout: str = "", name: str = "") -> dict:
     """Add a multileader (a callout): an arrow at the first point, a line through the next, and text
     at the last, using the current multileader style. Good for notes such as "1/4" DIA THRU, 4 PLACES".
 
@@ -91,6 +95,7 @@ def add_leader(points: list[Point], text: str, layer: str = "", name: str = "") 
         points: two or three points [[x, y], ...]: the arrow tip first, the text end last.
         text: the note; use \\P for a new line.
         layer: layer to put it on (default: current layer).
+        layout: a sheet's layout name to put it on its paper space (default: model space).
         name: which open drawing (default: active).
     """
     if not 2 <= len(points) <= 3:
@@ -98,10 +103,11 @@ def add_leader(points: list[Point], text: str, layer: str = "", name: str = "") 
     if not text.strip():
         raise AcadError("text cannot be empty.")
     doc = session.document(name)
+    space, where = drawing_space(doc, layout)
     flat = [c for p in points for c in xyz(p)]
     with session.edit(doc) as change:
-        result = doc.ModelSpace.AddMLeader(doubles(flat), 0)
+        result = space.AddMLeader(doubles(flat), 0)
         leader = result[0] if isinstance(result, tuple) else result  # late binding may also return the index
         change.add(leader)
         leader.TextString = text
-        return place(change, leader, layer)
+        return place(change, leader, layer, where)

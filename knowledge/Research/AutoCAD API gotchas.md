@@ -186,3 +186,8 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **unresolved:** whether CopyObjects accepts a `VT_ARRAY | VT_DISPATCH` VARIANT built from late-bound proxies (`com.objects`).
 - **unresolved:** whether `CopyObjects` from an ObjectDBX document with the target's `Blocks` collection as owner keeps dynamic block data (the usual VBA idiom says it does).
 - **unresolved:** whether setting `Name` on a dynamic reference (drawn by an anonymous `*U` block) switches it cleanly, and whether the renamed old dynamic definition can be deleted while its `*U` copies exist (if not, `import_blocks` reports it for purging).
+
+## 2026-11-18: text justification over COM (T5; not live-verified)
+- **documented / inferred:** a TEXT or ATTDEF is justified by setting `Alignment` (AcAlignment) and then `TextAlignmentPoint`; `InsertionPoint` is then computed by AutoCAD. Fit and Aligned need two points and are left out of `justify`.
+- **unresolved:** whether setting an MTEXT's `AttachmentPoint` keeps `InsertionPoint` where it was (`add_mtext` sets it again afterwards to be sure).
+- **user-reported (B6):** with a sheet tab active, objects added to `ModelSpace` are not in the current space, so `-BLOCK` refuses them ("not in current space").

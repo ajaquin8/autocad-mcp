@@ -313,3 +313,9 @@ Writer: Claude Code, on the user's go ("Continue to T2, T3"), step 2 of the impr
 - **T3:** new tool `import_blocks`: reads a library drawing with ObjectDBX (or the open document) and deep-clones the chosen definitions. `overwrite=True` renames the old definition aside, clones the new one, switches every reference to it (keeping placement, attributes and dynamic property values where still allowed), then deletes the old definition.
 - New module `autocad_mcp/tools/block_library.py`; `com.objects()` builds the VARIANT array of objects CopyObjects takes.
 - Tests: 9 new offline tests with a fake block table and deep copy; the five checks pass. **Not live-verified**; see the open questions in [[Research/AutoCAD API gotchas]].
+
+## 2026-11-18: text justification and style; which space drawing tools use (T5, B6)
+Writer: Claude Code, on the user's go ("Continue to T5, B6"), step 3 of the improvement list. Branch `feat/text-and-space` (from `main`), one commit per item.
+- **T5:** `add_text` and `add_attribute_definition` take `justify` (13 justifications, or TL, MC, BR ...) and `style`; `add_mtext` takes `attachment` and `style`. With a justification, `position` is the justification point. Unknown styles are refused with the drawing's list.
+- **B6:** model space stays the default. Drawing, text, dimension and leader tools, `add_attribute_definition` and `insert_block` report `space`; with a sheet tab active (paper space current) the result notes that the object went into model space. New optional `layout=` on those tools draws on a sheet.
+- Tests: 6 new offline tests (125 in total); the five checks pass. **Not live-verified.**
