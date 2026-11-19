@@ -15,7 +15,9 @@ expression:
 - cancels with (command) if the command is still waiting at the end, and goes back to an UNDO
   mark it set first if the command ended early or had to be cancelled;
 - writes that transcript to a file the server reads, so nothing needs COM while it runs.
-Running object snaps are off while it runs, and CMDECHO is on so the prompts are logged.
+Running object snaps are off while it runs, and CMDECHO is on so the prompts are logged. If the
+expression does not finish in time (a command stuck at a prompt it cannot be answered at), the
+server cancels it with Ctrl+C, unless AutoCAD shows a dialog (cancel_unfinished).
 
 How the expression is handed over (live 2026-11-11, AutoCAD 2027, scratch/AMCP-DIAG-20261111-*):
 - AutoCAD does NOT evaluate input when the parentheses close. It sits on the command line as
@@ -55,6 +57,7 @@ from .control import CANCEL_INPUT
 # A folder both this server and AutoCAD see (see the module docstring); AMCP_RUN_DIR overrides it.
 RUN_DIR = Path(os.environ.get("AMCP_RUN_DIR") or Path.home() / ".autocad-mcp" / "run")
 START_WAIT = 3.0  # seconds for the expression to start (it first creates the transcript file)
+CANCEL_WAIT = 5.0  # seconds for a cancelled expression to finish its transcript, and for AutoCAD to answer
 MAX_MESSAGE = 900  # characters per WM_COPYDATA message; AutoCAD drops a message of 1000 or more
 POLL = 0.05
 MAX_INPUTS = 60
@@ -378,6 +381,60 @@ def _wait_line(path: Path, prefix: str, seconds: float) -> bool:
         time.sleep(POLL)
 
 
+def autocad_answers(doc: Any, wait: float = 0.0) -> bool:
+    """True once the drawing answers COM with no command active, trying for up to `wait` seconds."""
+    deadline = time.monotonic() + wait
+    while True:
+        with worker.quick_retries():
+            try:
+                if not int(doc.GetVariable("CMDACTIVE")) & 1:
+                    return True
+            except (pywintypes.com_error, AttributeError) as err:
+                if not is_busy_error(err):
+                    raise
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(POLL)
+
+
+def cancel_unfinished(doc: Any, path: Path, sent: str, inputs: Sequence[Any], hwnd: int, name: str,
+                      timeout_seconds: float) -> str:
+    """The error for a command that did not finish in time, after cancelling it (B3, 2026-11-18: a Block
+    Editor action that never finished left AutoCAD refusing every call until cancel_command).
+
+    Not cancelled while AutoCAD shows a dialog (Ctrl+C cannot close it, and only the user should answer
+    it) or when another drawing has become active. Ctrl+C also stops the expression, whose error handler
+    puts the variables back, goes back to the UNDO mark and finishes the transcript, so the error can
+    say how far the command got."""
+    head = f"'{sent}' did not finish within {timeout_seconds:.0f}s."
+    blockers = describe_blockers(hwnd)
+    if blockers:
+        return head + " It is waiting in a dialog, so it was not cancelled; do NOT repeat it." + blockers
+    if not title_shows(window_title(hwnd), name):
+        return (head + f" '{doc.Name}' is no longer the active drawing, so it was not cancelled; do NOT repeat "
+                "it. Check acad_status.")
+    send_input(hwnd, CANCEL_INPUT)
+    _wait_line(path, "D\t", CANCEL_WAIT)
+    text = head + " The server cancelled it (Ctrl+C)"
+    partial = None
+    with contextlib.suppress(OSError):
+        partial = parse_transcript(_read(path), sent, inputs)
+    if partial and partial["undone"]:
+        text += " and the drawing was put back to how it was"
+    text += "."
+    if partial and partial["steps"]:
+        shown = partial["steps"][-8:]
+        steps = "; ".join(f"{s['sent']} -> {s['lastprompt']!r}" for s in shown)
+        more = f" (last {len(shown)} of {len(partial['steps'])})" if len(partial["steps"]) > len(shown) else ""
+        text += f" Prompts so far{more}: {steps}."
+    if autocad_answers(doc, CANCEL_WAIT):
+        text += " AutoCAD answers again. Do not repeat the command unchanged."
+    else:
+        text += (" AutoCAD still does not answer: call cancel_command, then acad_status. Do not repeat the command."
+                 + describe_blockers(hwnd))
+    return text
+
+
 def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: bool = True,
         timeout_seconds: float = 30.0) -> dict:
     """Run one command with its answers in a drawing this server may edit (see the module docstring)."""
@@ -418,8 +475,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
                                 f"of the command ran; what was typed was cancelled. Transcript folder: {RUN_DIR}."
                                 + describe_blockers(hwnd))
         if not _wait_line(path, "D\t", timeout_seconds):
-            raise AcadError(f"'{sent}' did not finish within {timeout_seconds:.0f}s. It may be waiting in a dialog "
-                            "or still working; do NOT repeat it. Check acad_status." + describe_blockers(hwnd))
+            raise AcadError(cancel_unfinished(doc, path, sent, inputs, hwnd, name, timeout_seconds))
         result = parse_transcript(_read(path), sent, inputs)
     finally:
         with contextlib.suppress(OSError):
@@ -428,15 +484,9 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
     result["messages"] = len(messages)
     result["undo_mark"] = undo
     # Safety net: the expression should never leave a command waiting; if one is, cancel it.
-    with worker.quick_retries():
-        try:
-            still = int(doc.GetVariable("CMDACTIVE")) & 1
-        except (pywintypes.com_error, AttributeError) as err:
-            if not is_busy_error(err):
-                raise
-            still = 1
-    if still and title_shows(window_title(hwnd), name):
+    if not autocad_answers(doc) and title_shows(window_title(hwnd), name):
         send_input(hwnd, CANCEL_INPUT)
+        result["answers_after_cancel"] = autocad_answers(doc, CANCEL_WAIT)
         result["cancelled_afterwards"] = True
     result["problem"] = problem(result)
     result["note"] = LAG_NOTE
@@ -450,8 +500,10 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
     server created (the edit guard and busy check apply). Use it for prompt-driven
     commands no other tool covers, e.g. Block Editor commands (BPARAMETER, BACTION) or
     -PURGE. AutoCAD is never left waiting: if the command still wants input after the
-    last answer it is cancelled, and if it ended early or was cancelled the drawing goes
-    back to how it was (UNDO mark). The result has a transcript of the prompts.
+    last answer, or has not finished within timeout_seconds, it is cancelled, and if it
+    ended early or was cancelled the drawing goes back to how it was (UNDO mark). The
+    result (or the error) has a transcript of the prompts. Only an AutoCAD dialog is left
+    for the user to answer.
 
     Answers: text as typed ("" is Enter; names with spaces are fine; options such as
     "_L" or "T"), numbers, [x, y] or [x, y, z] points in WCS drawing units,
@@ -474,6 +526,7 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
         name: which drawing; it must be the active one (default: the active drawing).
         undo_on_failure: go back to the UNDO mark if the command fails (default True;
             not used around BEDIT/BCLOSE/BSAVE).
-        timeout_seconds: how long to wait for the command to finish (default 30, max 150).
+        timeout_seconds: how long to wait for the command to finish before cancelling it
+            (default 30, max 150).
     """
     return run(session.document(name), command, inputs or [], undo_on_failure, timeout_seconds)

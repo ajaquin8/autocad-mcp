@@ -1058,15 +1058,18 @@ def test_command_names_are_checked():
 class _FakeAutoCAD:
     """Stands in for AutoCAD's command line: writes the transcript the expression would write."""
 
-    def __init__(self, lines, never_starts=False, still_active=False, doc=None, drops=None):
+    def __init__(self, lines, never_starts=False, still_active=False, doc=None, drops=None, on_cancel=None):
         self.lines, self.never_starts, self.still_active, self.doc = lines, never_starts, still_active, doc
-        self.sent, self.path, self.drops = [], None, drops
+        self.sent, self.path, self.drops, self.on_cancel = [], None, drops, on_cancel
 
     def send(self, hwnd, text):
         import re
         self.sent.append(text)
-        if text == "\x03\x03":
-            return True  # the cancel
+        if text == "\x03\x03":  # the cancel; on_cancel: what the expression's error handler then writes
+            if self.on_cancel and self.path:
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write("\n".join(self.on_cancel) + "\n")
+            return True
         stage = re.search(r'\(open "([^"]+)" "[wa]"\)\) \(write-line "S\\t(\d+)"', text)
         if stage:  # a piece of the expression being stored: AutoCAD notes that it took it
             self.path = stage[1]
@@ -1090,6 +1093,7 @@ def command_line(fake_app, monkeypatch, tmp_path):
     monkeypatch.setattr(session, "hwnd", 1234)
     monkeypatch.setattr(commands, "RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(commands, "START_WAIT", 0.2)
+    monkeypatch.setattr(commands, "CANCEL_WAIT", 0.2)
     monkeypatch.setattr(commands, "POLL", 0.01)
     monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
     monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: False)
@@ -1171,9 +1175,49 @@ def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
 def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypatch):
     fake = command_line(_FakeAutoCAD(["B\t", "C\tx"]))  # never finishes: e.g. stuck in a dialog
     monkeypatch.setattr(commands, "describe_blockers", lambda hwnd: ' AutoCAD shows the dialog "Block".')
-    with pytest.raises(AcadError, match='did not finish.*do NOT repeat.*"Block"'):
+    with pytest.raises(AcadError, match='did not finish.*not cancelled.*do NOT repeat.*"Block"'):
         commands.run(fake_app.doc, "BCLOSE", timeout_seconds=1)
     assert fake.sent.count("(eval (read amcp:src))\n") == 1  # sent once: nothing repeated
+    assert "\x03\x03" not in fake.sent  # a dialog is the user's to answer: no Ctrl+C into it
+
+
+def test_run_command_cancels_a_command_that_does_not_finish(fake_app, command_line, monkeypatch):
+    # B3: a Block Editor action stuck at a prompt left AutoCAD refusing every call until cancel_command.
+    fake = command_line(_FakeAutoCAD(
+        ["B\t", "C\tSelect parameter:", "P\tEnter action type [Array/Move/Scale/sTretch]:"],
+        on_cancel=["X\tFunction cancelled", "U\t", "D\t0"]))
+    with pytest.raises(AcadError) as caught:
+        commands.run(fake_app.doc, "BACTION", [[1, 2], "_T"], timeout_seconds=1)
+    message = str(caught.value)
+    assert "did not finish within 1s" in message and "cancelled it" in message and "put back" in message
+    assert "[1, 2] -> 'Enter action type" in message and "AutoCAD answers again" in message
+    assert fake.sent[-1] == "\x03\x03" and fake.sent.count("(eval (read amcp:src))\n") == 1
+    assert not list(commands.RUN_DIR.iterdir())  # the transcript file is removed
+
+
+def test_run_command_says_when_autocad_still_refuses_after_the_cancel(fake_app, command_line, monkeypatch):
+    command_line(_FakeAutoCAD(["B\t", "C\tx"]))  # the cancel does not end it
+    real = fake_app.doc.GetVariable
+    calls = {"n": 0}
+
+    def refusing(name):
+        if name == "CMDACTIVE":
+            calls["n"] += 1
+            if calls["n"] > 1:  # the first is require_idle before anything is sent
+                raise AttributeError("<unknown>.GetVariable")
+        return real(name)
+    fake_app.doc.GetVariable = refusing
+    with pytest.raises(AcadError, match="cancelled it.*still does not answer: call cancel_command"):
+        commands.run(fake_app.doc, "BACTION", timeout_seconds=1, undo_on_failure=False)
+
+
+def test_run_command_does_not_cancel_in_another_drawing(fake_app, command_line, monkeypatch):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx"]))
+    titles = iter(["AutoCAD 2027 - [Drawing1.dwg]"])
+    monkeypatch.setattr(commands, "window_title", lambda hwnd: next(titles, "AutoCAD 2027 - [Plan.dwg]"))
+    with pytest.raises(AcadError, match="no longer the active drawing, so it was not cancelled"):
+        commands.run(fake_app.doc, "BACTION", timeout_seconds=1)
+    assert "\x03\x03" not in fake.sent
 
 
 def test_run_command_keeps_the_guards(fake_app, command_line, monkeypatch):

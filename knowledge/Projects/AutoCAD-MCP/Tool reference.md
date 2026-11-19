@@ -93,7 +93,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 ## commands
 
-- **`run_command`**: Run one AutoCAD command with a list of answers to its prompts, in a drawing this server created (the edit guard and busy check apply). Use it for prompt-driven commands no other tool covers, e.g. Block Editor commands (BPARAMETER, BACTION) or -PURGE. AutoCAD is never left waiting: if the command still wants input after the last answer it is cancelled, and if it ended early or was cancelled the drawing goes back to how it was (UNDO mark). The result has a transcript of the prompts. Parameters: `command`, `inputs`, `name`, `undo_on_failure`, `timeout_seconds`.
+- **`run_command`**: Run one AutoCAD command with a list of answers to its prompts, in a drawing this server created (the edit guard and busy check apply). Use it for prompt-driven commands no other tool covers, e.g. Block Editor commands (BPARAMETER, BACTION) or -PURGE. AutoCAD is never left waiting: if the command still wants input after the last answer, or has not finished within timeout_seconds, it is cancelled, and if it ended early or was cancelled the drawing goes back to how it was (UNDO mark). The result (or the error) has a transcript of the prompts. Only an AutoCAD dialog is left for the user to answer. Parameters: `command`, `inputs`, `name`, `undo_on_failure`, `timeout_seconds`.
 
 ## control
 
