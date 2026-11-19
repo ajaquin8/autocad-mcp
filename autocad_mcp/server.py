@@ -8,6 +8,7 @@ from .app import mcp
 from .tools import (  # noqa: F401
     annotate,
     block_editor,
+    block_library,
     blocks,
     commands,
     control,
