@@ -1034,8 +1034,14 @@ def test_command_answers_cover_objects_and_selections():
     assert commands.lisp_input({"select_all": "lwpolyline,dimension"}) == \
         '(ssget "_X" (list (cons 0 "LWPOLYLINE,DIMENSION")))'
     assert commands.lisp_input(0.1) == "0.1" and commands.lisp_input(1e-7) == "0.0000001"
+    assert commands.lisp_input({"window": [[0, 0], [1, 1]]}) == \
+        '(ssget "_W" (trans (list 0.0 0.0 0.0) 0 1) (trans (list 1.0 1.0 0.0) 0 1))'
+    picked = commands.lisp_input({"handles": ["2a", "3B"], "except": "dimension"})
+    assert '(handent "2A") (handent "3B")' in picked and '(wcmatch (cdr (assoc 0 (entget e))) "DIMENSION")' in picked
+    assert _lisp_tokens(picked)[0] == 0 and picked.endswith("(ssadd))")
     for bad in ['(command "ERASE")', "!x", "'ZOOM", "a\nb", True, [1], {"handle": "zz"}, {"select_all": "A) (x"},
-                {"what": 1}]:
+                {"what": 1}, {"crossing": [[0, 0]]}, {"handles": []}, {"handles": ["zz"]},
+                {"window": [[0, 0], [1, 1]], "except": "A) (x"}, {"crossing": [[0, 0], [1, 1]], "extra": 1}]:
         with pytest.raises(ValueError):
             commands.lisp_input(bad)
 
@@ -1311,22 +1317,53 @@ def test_linear_parameter_needs_the_editor_and_reports_failure(fake_app, monkeyp
         block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6])
 
 
+def _view(doc, centre, height, screen=(1000, 500)):
+    doc.variables.update({"VIEWCTR": (*centre, 0.0), "VIEWSIZE": height, "SCREENSIZE": screen})
+
+
 def test_stretch_action_inputs_follow_the_live_prompts(fake_app, monkeypatch):
     doc, runs = _editor(fake_app, monkeypatch, open_=True)
     zoomed = []
     fake_app.ZoomExtents = lambda: zoomed.append(True)
+    _view(doc, (30, 40), 120)  # shows x -90..150, y -20..100
     doc.variables["BACTIONBARMODE"] = 1
-    block_editor.add_stretch_action([12, -6], [[40, -10], [60, 90]])
+    out = block_editor.add_stretch_action([12, -6], [[40, -10], [60, 90]])
     (command, inputs, undo), = runs.calls
-    assert command == "BACTION" and undo and zoomed
-    assert inputs == [[12, -6], "_T", "_S", [40, -10], [60, 90], "_C", [40, -10], [60, 90], "", [12, -6]]
+    assert command == "BACTION" and undo and zoomed and out["zoom"] == "extents"
+    assert inputs == [[12, -6], "_T", "_S", [40, -10], [60, 90], {"crossing": [[40, -10], [60, 90]]}, "", [12, -6]]
     assert doc.variables["BACTIONBARMODE"] == 1  # put back
-    centre = block_editor.stretch_inputs([12, -6], [[20, -10], [28, 90]], None, "second", 0.5, None, [30, 0])
-    assert centre[-6:] == ["_R", {"select_all": "LWPOLYLINE,DIMENSION"}, "", "_M", 0.5, [30, 0]]
     own = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], {"handles": ["2A"]}, "start", None, "", None)
-    assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handle": "2A"}, "", [0, 0]]
+    assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handles": ["2A"]}, "", [0, 0]]
     with pytest.raises(ValueError):
         block_editor.stretch_inputs([0, 0], [[0, 0]], None, "second", None, None, None)
+
+
+def test_centred_stretch_answers_m_value_location_and_selects_in_the_current_space():
+    # B1: the multiplier path removed polylines and dimensions with ssget "_X" (the whole drawing, not the
+    # block being edited) and left BACTION waiting. Now they are left out of the one crossing selection.
+    centre = block_editor.stretch_inputs([12, -6], [[20, -10], [28, 90]], None, "second", 0.5, None, [30, 0])
+    assert centre[5:] == [{"crossing": [[20, -10], [28, 90]], "except": "LWPOLYLINE,DIMENSION"}, "",
+                          "_M", 0.5, [30, 0]]
+    assert not any(isinstance(a, dict) and "select_all" in a for a in centre) and "_R" not in centre
+    lisp = commands.lisp_input(centre[5])
+    assert lisp == ('(ssget "_C" (trans (list 20.0 -10.0 0.0) 0 1) (trans (list 28.0 90.0 0.0) 0 1) '
+                    '(list (cons -4 "<NOT") (cons 0 "LWPOLYLINE,DIMENSION") (cons -4 "NOT>")))')
+    assert _lisp_tokens(lisp)[0] == 0
+    plain = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], {"window": [[0, 0], [2, 2]]}, "second", 0.5, "",
+                                        None)
+    assert plain[5:] == [{"window": [[0, 0], [2, 2]]}, "", "_M", 0.5, [0, 0]]
+
+
+def test_stretch_action_widens_the_view_to_show_every_pick_point(fake_app, monkeypatch):
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    _view(doc, (0, 0), 20)  # shows x -20..20, y -10..10: the location at x 90 is off screen
+    out = block_editor.add_stretch_action([0, 5], [[-5, -5], [5, 15]], location=[90, 0])
+    assert out["zoom"].startswith("extents, widened")
+    (lower, upper, _) = fake_app.zoomed
+    assert lower[0] < -20 and lower[1] < -10 and upper[0] > 90 and upper[1] > 15
+    assert block_editor.pick_points([[1, 2], "_T", {"crossing": [[3, 4], [5, 6]]}, {"handles": ["2A"]}]) == \
+        [(1, 2), (3, 4), (5, 6)]
 
 
 def test_lock_attribute_positions_one_undo_step(fake_app, monkeypatch):

@@ -125,13 +125,58 @@ def lisp_point(value: Sequence[float]) -> str:
     return f"(trans (list {lisp_number(x)} {lisp_number(y)} {lisp_number(z)}) 0 1)"
 
 
+def lisp_types(value: Any) -> str:
+    types = str(value).strip().upper()
+    if not OBJECT_TYPES.match(types):
+        raise ValueError(f"'{types}' is not a list of DXF object types such as LWPOLYLINE,DIMENSION.")
+    return types
+
+
+def lisp_handle(value: Any) -> str:
+    handle = str(value).strip()
+    if not HANDLE.match(handle):
+        raise ValueError(f"'{handle}' is not an entity handle.")
+    return f"(handent {lisp_string(handle.upper())})"
+
+
+def lisp_selection(value: dict) -> str:
+    """A selection set built in AutoCAD: {"crossing" | "window": [p1, p2]} selects in the current space
+    and needs the window on screen (as a pick would); {"handles": [...]} takes those objects. "except":
+    "TYPES" leaves objects of those DXF types out. Nothing selected gives nil (the command is stopped)."""
+    keys = set(value)
+    kind = next((k for k in ("crossing", "window", "handles") if k in keys), None)
+    if kind is None or keys - {kind, "except"}:
+        raise ValueError(f"Cannot read the selection {value!r}.")
+    if kind == "handles":
+        handles = value["handles"]
+        if not isinstance(handles, (list, tuple)) or not handles or len(handles) > MAX_INPUTS:
+            raise ValueError(f"handles takes a list of 1 to {MAX_INPUTS} entity handles.")
+        ents = " ".join(lisp_handle(h) for h in handles)
+        test = "e"
+        if "except" in value:
+            test = f'(and e (not (wcmatch (cdr (assoc 0 (entget e))) {lisp_string(lisp_types(value["except"]))})))'
+        return (f"((lambda (ss) (foreach e (list {ents}) (if {test} (ssadd e ss)))"
+                " (if (> (sslength ss) 0) ss)) (ssadd))")
+    corners = value[kind]
+    if not isinstance(corners, (list, tuple)) or len(corners) != 2:
+        raise ValueError(f"{kind} takes two corners [[x1, y1], [x2, y2]].")
+    mode = "_C" if kind == "crossing" else "_W"
+    args = f'(ssget "{mode}" {lisp_point(corners[0])} {lisp_point(corners[1])}'
+    if "except" in value:
+        types = lisp_string(lisp_types(value["except"]))
+        args += f' (list (cons -4 "<NOT") (cons 0 {types}) (cons -4 "NOT>"))'
+    return args + ")"
+
+
 def lisp_input(value: Any) -> str:
     """One answer to a prompt as an AutoLISP expression.
 
     Text is sent as typed ("" is Enter), numbers as numbers, [x, y] or [x, y, z] as a WCS point.
     {"handle": h} is that object, {"handle": h, "point": p} picks it at that point (as entsel
-    would), {"last": true} is the newest object, and {"select_all": "LWPOLYLINE,DIMENSION"} is
-    every object of those types in the current space (for "Select objects" / Remove).
+    would), {"last": true} is the newest object. For "Select objects": {"crossing": [p1, p2]} or
+    {"window": [p1, p2]} (current space, on screen) and {"handles": [...]}, each optionally with
+    "except": "LWPOLYLINE,DIMENSION"; {"select_all": "TYPES"} is every object of those types in the
+    whole drawing (ssget "_X": model space and every layout, not just the current space).
     """
     if isinstance(value, bool):
         raise ValueError(f"An answer cannot be true/false: {value!r}. Send text such as \"Yes\".")
@@ -150,20 +195,18 @@ def lisp_input(value: Any) -> str:
         if keys == {"point"}:
             return lisp_point(value["point"])
         if keys in ({"handle"}, {"handle", "point"}):
-            handle = str(value["handle"]).strip()
-            if not HANDLE.match(handle):
-                raise ValueError(f"'{handle}' is not an entity handle.")
-            ent = f"(handent {lisp_string(handle.upper())})"
+            ent = lisp_handle(value["handle"])
             return f"(list {ent} {lisp_point(value['point'])})" if "point" in keys else ent
         if keys == {"last"} and value["last"] is True:
             return "(entlast)"
         if keys == {"select_all"}:
-            types = str(value["select_all"]).strip().upper()
-            if not OBJECT_TYPES.match(types):
-                raise ValueError(f"'{types}' is not a list of DXF object types such as LWPOLYLINE,DIMENSION.")
-            return f'(ssget "_X" (list (cons 0 {lisp_string(types)})))'
+            return f'(ssget "_X" (list (cons 0 {lisp_string(lisp_types(value["select_all"]))})))'
+        if keys & {"crossing", "window", "handles"}:
+            return lisp_selection(value)
     raise ValueError(f"Cannot send {value!r} as an answer: use text, a number, [x, y], or "
-                     '{"handle": ...}, {"handle": ..., "point": [x, y]}, {"last": true}, {"select_all": "TYPES"}.')
+                     '{"handle": ...}, {"handle": ..., "point": [x, y]}, {"last": true}, {"crossing": [p1, p2]}, '
+                     '{"window": [p1, p2]}, {"handles": [...]} (optionally with "except": "TYPES"), '
+                     '{"select_all": "TYPES"}.')
 
 
 SAVED_VARS = ("OSMODE", "CMDECHO", "CMDDIA", "ATTDIA")
@@ -413,8 +456,11 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
     Answers: text as typed ("" is Enter; names with spaces are fine; options such as
     "_L" or "T"), numbers, [x, y] or [x, y, z] points in WCS drawing units,
     {"handle": "1A2"} for an object, {"handle": "1A2", "point": [x, y]} to pick it at a
-    point, {"last": true} for the newest object, {"select_all": "LWPOLYLINE,DIMENSION"}
-    for every object of those types. Running object snaps are off while it runs.
+    point, {"last": true} for the newest object. At "Select objects": {"crossing": [p1, p2]}
+    or {"window": [p1, p2]} (current space; the window must be on screen) or
+    {"handles": [...]}, each optionally with "except": "LWPOLYLINE,DIMENSION" to leave those
+    types out; {"select_all": "TYPES"} is every object of those types in the whole drawing
+    (all spaces). Running object snaps are off while it runs.
     Text starting with "(", "!" or "'" is refused, and so are commands that run code,
     change AutoCAD's setup, write or close files, or switch drawings.
 
