@@ -401,6 +401,55 @@ def test_status_names_the_product_year(fake_app):
     assert status["autocad"] == "AutoCAD 2027" and status["autocad_version"] == "26.0s (LMS Tech)"
 
 
+def _second_drawing(fake_app, switches: bool = True):
+    """Drawing2.dwg open behind the active drawing; Activate brings it to the front if `switches`."""
+    other = FakeDoc("Drawing2.dwg")
+    docs = fake_app.Documents.docs
+    docs.append(other)
+    other.activated = 0
+
+    def activate():
+        other.activated += 1
+        if switches:
+            docs.insert(0, docs.pop(docs.index(other)))
+    other.Activate = activate
+    return other
+
+
+def test_activate_document_switches_tabs_only_when_autocad_is_idle(fake_app):
+    other = _second_drawing(fake_app)
+    fake_app.doc.variables["CMDACTIVE"] = 1  # the user is in a command in the active drawing
+    with pytest.raises(AcadError, match="busy"):
+        documents.activate_document("Drawing2.dwg")
+    assert other.activated == 0
+    fake_app.doc.variables["CMDACTIVE"] = 0
+    other.variables["CMDACTIVE"] = 8  # a dialog in the drawing to switch to
+    with pytest.raises(AcadError, match="not switching"):
+        documents.activate_document("Drawing2.dwg")
+    other.variables["CMDACTIVE"] = 0
+    out = documents.activate_document("drawing2.dwg")
+    assert out["active"] and out["name"] == "Drawing2.dwg" and fake_app.ActiveDocument is other
+    assert out["editable"] is False  # switching to a drawing does not unlock it
+    again = documents.activate_document("Drawing2.dwg")
+    assert again["note"] == "already the active drawing" and other.activated == 1
+    with pytest.raises(AcadError, match="No open drawing"):
+        documents.activate_document("Nope.dwg")
+
+
+def test_activate_document_reports_when_autocad_does_not_switch(fake_app):
+    _second_drawing(fake_app, switches=False)
+    with pytest.raises(AcadError, match="did not switch.*click its tab"):
+        documents.activate_document("Drawing2.dwg")
+
+
+def test_tools_for_the_active_drawing_point_to_activate_document(fake_app):
+    other = _second_drawing(fake_app)
+    session.mark_owned(other)
+    with pytest.raises(AcadError, match="not the active drawing.*activate_document"):
+        query.zoom_extents("Drawing2.dwg")
+    assert "activate_document" in documents.open_drawing.__doc__
+
+
 def test_close_refuses_user_drawings(fake_app):
     with pytest.raises(AcadError, match="not created by this server"):
         documents.close_document("Drawing1.dwg")

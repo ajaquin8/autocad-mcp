@@ -48,7 +48,7 @@ import pywintypes
 
 from ..app import acad_tool
 from ..com import AcadError, worker, xyz
-from ..session import doc_key, is_busy_error, session
+from ..session import is_busy_error, session
 from ..winui import describe_blockers, send_input, window_title
 from .control import CANCEL_INPUT
 
@@ -343,10 +343,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
     check_inputs(inputs)
     session.require_editable(doc)
     session.require_idle(doc)
-    app = session.app
-    if doc_key(app.ActiveDocument) != doc_key(doc):
-        raise AcadError(f"'{doc.Name}' is not the active drawing. Commands run in the active drawing only; "
-                        "ask the user to switch to it (the server does not switch tabs under the user).")
+    session.require_active(doc, "commands run in the active drawing only")
     bare = bare_name(sent)
     if is_system_variable(doc, bare):
         raise AcadError(f"'{bare}' is a system variable, not a command; use set_drawing_variables.")

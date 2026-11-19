@@ -58,8 +58,7 @@ def add_viewport(layout: str, corner: Point, opposite_corner: Point, view_center
     if width == 0 or height == 0:
         raise AcadError("corner and opposite_corner must span a rectangle.")
     doc = session.document(name)
-    if str(doc.Name) != str(session.app.ActiveDocument.Name):
-        raise AcadError(f"'{doc.Name}' is not the active drawing; AutoCAD only sets up viewports in the active one.")
+    session.require_active(doc, "AutoCAD only sets up viewports in the active one")
     sheet = find_layout(doc, layout)
     if bool(sheet.ModelType):
         raise AcadError("Pick a paper layout (a sheet), not Model.")
