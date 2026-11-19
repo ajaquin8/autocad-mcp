@@ -15,7 +15,9 @@ expression:
 - cancels with (command) if the command is still waiting at the end, and goes back to an UNDO
   mark it set first if the command ended early or had to be cancelled;
 - writes that transcript to a file the server reads, so nothing needs COM while it runs.
-Running object snaps are off while it runs, and CMDECHO is on so the prompts are logged.
+Running object snaps are off while it runs, and CMDECHO is on so the prompts are logged. If the
+expression does not finish in time (a command stuck at a prompt it cannot be answered at), the
+server cancels it with Ctrl+C, unless AutoCAD shows a dialog (cancel_unfinished).
 
 How the expression is handed over (live 2026-11-11, AutoCAD 2027, scratch/AMCP-DIAG-20261111-*):
 - AutoCAD does NOT evaluate input when the parentheses close. It sits on the command line as
@@ -48,13 +50,14 @@ import pywintypes
 
 from ..app import acad_tool
 from ..com import AcadError, worker, xyz
-from ..session import doc_key, is_busy_error, session
+from ..session import is_busy_error, session
 from ..winui import describe_blockers, send_input, window_title
 from .control import CANCEL_INPUT
 
 # A folder both this server and AutoCAD see (see the module docstring); AMCP_RUN_DIR overrides it.
 RUN_DIR = Path(os.environ.get("AMCP_RUN_DIR") or Path.home() / ".autocad-mcp" / "run")
 START_WAIT = 3.0  # seconds for the expression to start (it first creates the transcript file)
+CANCEL_WAIT = 5.0  # seconds for a cancelled expression to finish its transcript, and for AutoCAD to answer
 MAX_MESSAGE = 900  # characters per WM_COPYDATA message; AutoCAD drops a message of 1000 or more
 POLL = 0.05
 MAX_INPUTS = 60
@@ -125,13 +128,58 @@ def lisp_point(value: Sequence[float]) -> str:
     return f"(trans (list {lisp_number(x)} {lisp_number(y)} {lisp_number(z)}) 0 1)"
 
 
+def lisp_types(value: Any) -> str:
+    types = str(value).strip().upper()
+    if not OBJECT_TYPES.match(types):
+        raise ValueError(f"'{types}' is not a list of DXF object types such as LWPOLYLINE,DIMENSION.")
+    return types
+
+
+def lisp_handle(value: Any) -> str:
+    handle = str(value).strip()
+    if not HANDLE.match(handle):
+        raise ValueError(f"'{handle}' is not an entity handle.")
+    return f"(handent {lisp_string(handle.upper())})"
+
+
+def lisp_selection(value: dict) -> str:
+    """A selection set built in AutoCAD: {"crossing" | "window": [p1, p2]} selects in the current space
+    and needs the window on screen (as a pick would); {"handles": [...]} takes those objects. "except":
+    "TYPES" leaves objects of those DXF types out. Nothing selected gives nil (the command is stopped)."""
+    keys = set(value)
+    kind = next((k for k in ("crossing", "window", "handles") if k in keys), None)
+    if kind is None or keys - {kind, "except"}:
+        raise ValueError(f"Cannot read the selection {value!r}.")
+    if kind == "handles":
+        handles = value["handles"]
+        if not isinstance(handles, (list, tuple)) or not handles or len(handles) > MAX_INPUTS:
+            raise ValueError(f"handles takes a list of 1 to {MAX_INPUTS} entity handles.")
+        ents = " ".join(lisp_handle(h) for h in handles)
+        test = "e"
+        if "except" in value:
+            test = f'(and e (not (wcmatch (cdr (assoc 0 (entget e))) {lisp_string(lisp_types(value["except"]))})))'
+        return (f"((lambda (ss) (foreach e (list {ents}) (if {test} (ssadd e ss)))"
+                " (if (> (sslength ss) 0) ss)) (ssadd))")
+    corners = value[kind]
+    if not isinstance(corners, (list, tuple)) or len(corners) != 2:
+        raise ValueError(f"{kind} takes two corners [[x1, y1], [x2, y2]].")
+    mode = "_C" if kind == "crossing" else "_W"
+    args = f'(ssget "{mode}" {lisp_point(corners[0])} {lisp_point(corners[1])}'
+    if "except" in value:
+        types = lisp_string(lisp_types(value["except"]))
+        args += f' (list (cons -4 "<NOT") (cons 0 {types}) (cons -4 "NOT>"))'
+    return args + ")"
+
+
 def lisp_input(value: Any) -> str:
     """One answer to a prompt as an AutoLISP expression.
 
     Text is sent as typed ("" is Enter), numbers as numbers, [x, y] or [x, y, z] as a WCS point.
     {"handle": h} is that object, {"handle": h, "point": p} picks it at that point (as entsel
-    would), {"last": true} is the newest object, and {"select_all": "LWPOLYLINE,DIMENSION"} is
-    every object of those types in the current space (for "Select objects" / Remove).
+    would), {"last": true} is the newest object. For "Select objects": {"crossing": [p1, p2]} or
+    {"window": [p1, p2]} (current space, on screen) and {"handles": [...]}, each optionally with
+    "except": "LWPOLYLINE,DIMENSION"; {"select_all": "TYPES"} is every object of those types in the
+    whole drawing (ssget "_X": model space and every layout, not just the current space).
     """
     if isinstance(value, bool):
         raise ValueError(f"An answer cannot be true/false: {value!r}. Send text such as \"Yes\".")
@@ -150,20 +198,18 @@ def lisp_input(value: Any) -> str:
         if keys == {"point"}:
             return lisp_point(value["point"])
         if keys in ({"handle"}, {"handle", "point"}):
-            handle = str(value["handle"]).strip()
-            if not HANDLE.match(handle):
-                raise ValueError(f"'{handle}' is not an entity handle.")
-            ent = f"(handent {lisp_string(handle.upper())})"
+            ent = lisp_handle(value["handle"])
             return f"(list {ent} {lisp_point(value['point'])})" if "point" in keys else ent
         if keys == {"last"} and value["last"] is True:
             return "(entlast)"
         if keys == {"select_all"}:
-            types = str(value["select_all"]).strip().upper()
-            if not OBJECT_TYPES.match(types):
-                raise ValueError(f"'{types}' is not a list of DXF object types such as LWPOLYLINE,DIMENSION.")
-            return f'(ssget "_X" (list (cons 0 {lisp_string(types)})))'
+            return f'(ssget "_X" (list (cons 0 {lisp_string(lisp_types(value["select_all"]))})))'
+        if keys & {"crossing", "window", "handles"}:
+            return lisp_selection(value)
     raise ValueError(f"Cannot send {value!r} as an answer: use text, a number, [x, y], or "
-                     '{"handle": ...}, {"handle": ..., "point": [x, y]}, {"last": true}, {"select_all": "TYPES"}.')
+                     '{"handle": ...}, {"handle": ..., "point": [x, y]}, {"last": true}, {"crossing": [p1, p2]}, '
+                     '{"window": [p1, p2]}, {"handles": [...]} (optionally with "except": "TYPES"), '
+                     '{"select_all": "TYPES"}.')
 
 
 SAVED_VARS = ("OSMODE", "CMDECHO", "CMDDIA", "ATTDIA")
@@ -335,6 +381,60 @@ def _wait_line(path: Path, prefix: str, seconds: float) -> bool:
         time.sleep(POLL)
 
 
+def autocad_answers(doc: Any, wait: float = 0.0) -> bool:
+    """True once the drawing answers COM with no command active, trying for up to `wait` seconds."""
+    deadline = time.monotonic() + wait
+    while True:
+        with worker.quick_retries():
+            try:
+                if not int(doc.GetVariable("CMDACTIVE")) & 1:
+                    return True
+            except (pywintypes.com_error, AttributeError) as err:
+                if not is_busy_error(err):
+                    raise
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(POLL)
+
+
+def cancel_unfinished(doc: Any, path: Path, sent: str, inputs: Sequence[Any], hwnd: int, name: str,
+                      timeout_seconds: float) -> str:
+    """The error for a command that did not finish in time, after cancelling it (B3, 2026-11-18: a Block
+    Editor action that never finished left AutoCAD refusing every call until cancel_command).
+
+    Not cancelled while AutoCAD shows a dialog (Ctrl+C cannot close it, and only the user should answer
+    it) or when another drawing has become active. Ctrl+C also stops the expression, whose error handler
+    puts the variables back, goes back to the UNDO mark and finishes the transcript, so the error can
+    say how far the command got."""
+    head = f"'{sent}' did not finish within {timeout_seconds:.0f}s."
+    blockers = describe_blockers(hwnd)
+    if blockers:
+        return head + " It is waiting in a dialog, so it was not cancelled; do NOT repeat it." + blockers
+    if not title_shows(window_title(hwnd), name):
+        return (head + f" '{doc.Name}' is no longer the active drawing, so it was not cancelled; do NOT repeat "
+                "it. Check acad_status.")
+    send_input(hwnd, CANCEL_INPUT)
+    _wait_line(path, "D\t", CANCEL_WAIT)
+    text = head + " The server cancelled it (Ctrl+C)"
+    partial = None
+    with contextlib.suppress(OSError):
+        partial = parse_transcript(_read(path), sent, inputs)
+    if partial and partial["undone"]:
+        text += " and the drawing was put back to how it was"
+    text += "."
+    if partial and partial["steps"]:
+        shown = partial["steps"][-8:]
+        steps = "; ".join(f"{s['sent']} -> {s['lastprompt']!r}" for s in shown)
+        more = f" (last {len(shown)} of {len(partial['steps'])})" if len(partial["steps"]) > len(shown) else ""
+        text += f" Prompts so far{more}: {steps}."
+    if autocad_answers(doc, CANCEL_WAIT):
+        text += " AutoCAD answers again. Do not repeat the command unchanged."
+    else:
+        text += (" AutoCAD still does not answer: call cancel_command, then acad_status. Do not repeat the command."
+                 + describe_blockers(hwnd))
+    return text
+
+
 def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: bool = True,
         timeout_seconds: float = 30.0) -> dict:
     """Run one command with its answers in a drawing this server may edit (see the module docstring)."""
@@ -343,10 +443,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
     check_inputs(inputs)
     session.require_editable(doc)
     session.require_idle(doc)
-    app = session.app
-    if doc_key(app.ActiveDocument) != doc_key(doc):
-        raise AcadError(f"'{doc.Name}' is not the active drawing. Commands run in the active drawing only; "
-                        "ask the user to switch to it (the server does not switch tabs under the user).")
+    session.require_active(doc, "commands run in the active drawing only")
     bare = bare_name(sent)
     if is_system_variable(doc, bare):
         raise AcadError(f"'{bare}' is a system variable, not a command; use set_drawing_variables.")
@@ -378,8 +475,7 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
                                 f"of the command ran; what was typed was cancelled. Transcript folder: {RUN_DIR}."
                                 + describe_blockers(hwnd))
         if not _wait_line(path, "D\t", timeout_seconds):
-            raise AcadError(f"'{sent}' did not finish within {timeout_seconds:.0f}s. It may be waiting in a dialog "
-                            "or still working; do NOT repeat it. Check acad_status." + describe_blockers(hwnd))
+            raise AcadError(cancel_unfinished(doc, path, sent, inputs, hwnd, name, timeout_seconds))
         result = parse_transcript(_read(path), sent, inputs)
     finally:
         with contextlib.suppress(OSError):
@@ -388,15 +484,9 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
     result["messages"] = len(messages)
     result["undo_mark"] = undo
     # Safety net: the expression should never leave a command waiting; if one is, cancel it.
-    with worker.quick_retries():
-        try:
-            still = int(doc.GetVariable("CMDACTIVE")) & 1
-        except (pywintypes.com_error, AttributeError) as err:
-            if not is_busy_error(err):
-                raise
-            still = 1
-    if still and title_shows(window_title(hwnd), name):
+    if not autocad_answers(doc) and title_shows(window_title(hwnd), name):
         send_input(hwnd, CANCEL_INPUT)
+        result["answers_after_cancel"] = autocad_answers(doc, CANCEL_WAIT)
         result["cancelled_afterwards"] = True
     result["problem"] = problem(result)
     result["note"] = LAG_NOTE
@@ -410,14 +500,19 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
     server created (the edit guard and busy check apply). Use it for prompt-driven
     commands no other tool covers, e.g. Block Editor commands (BPARAMETER, BACTION) or
     -PURGE. AutoCAD is never left waiting: if the command still wants input after the
-    last answer it is cancelled, and if it ended early or was cancelled the drawing goes
-    back to how it was (UNDO mark). The result has a transcript of the prompts.
+    last answer, or has not finished within timeout_seconds, it is cancelled, and if it
+    ended early or was cancelled the drawing goes back to how it was (UNDO mark). The
+    result (or the error) has a transcript of the prompts. Only an AutoCAD dialog is left
+    for the user to answer.
 
     Answers: text as typed ("" is Enter; names with spaces are fine; options such as
     "_L" or "T"), numbers, [x, y] or [x, y, z] points in WCS drawing units,
     {"handle": "1A2"} for an object, {"handle": "1A2", "point": [x, y]} to pick it at a
-    point, {"last": true} for the newest object, {"select_all": "LWPOLYLINE,DIMENSION"}
-    for every object of those types. Running object snaps are off while it runs.
+    point, {"last": true} for the newest object. At "Select objects": {"crossing": [p1, p2]}
+    or {"window": [p1, p2]} (current space; the window must be on screen) or
+    {"handles": [...]}, each optionally with "except": "LWPOLYLINE,DIMENSION" to leave those
+    types out; {"select_all": "TYPES"} is every object of those types in the whole drawing
+    (all spaces). Running object snaps are off while it runs.
     Text starting with "(", "!" or "'" is refused, and so are commands that run code,
     change AutoCAD's setup, write or close files, or switch drawings.
 
@@ -431,6 +526,7 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
         name: which drawing; it must be the active one (default: the active drawing).
         undo_on_failure: go back to the UNDO mark if the command fails (default True;
             not used around BEDIT/BCLOSE/BSAVE).
-        timeout_seconds: how long to wait for the command to finish (default 30, max 150).
+        timeout_seconds: how long to wait for the command to finish before cancelling it
+            (default 30, max 150).
     """
     return run(session.document(name), command, inputs or [], undo_on_failure, timeout_seconds)

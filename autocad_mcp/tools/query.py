@@ -114,8 +114,7 @@ def zoom_extents(name: str = "") -> str:
     """
     doc = session.document(name)
     session.require_idle(doc)
-    if str(doc.Name) != str(session.app.ActiveDocument.Name):
-        raise AcadError(f"'{doc.Name}' is not the active drawing; AutoCAD only zooms the active one.")
+    session.require_active(doc, "AutoCAD only zooms the active one")
     session.app.ZoomExtents()
     return "Zoomed to extents."
 

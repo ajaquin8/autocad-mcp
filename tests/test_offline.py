@@ -402,6 +402,55 @@ def test_status_names_the_product_year(fake_app):
     assert status["autocad"] == "AutoCAD 2027" and status["autocad_version"] == "26.0s (LMS Tech)"
 
 
+def _second_drawing(fake_app, switches: bool = True):
+    """Drawing2.dwg open behind the active drawing; Activate brings it to the front if `switches`."""
+    other = FakeDoc("Drawing2.dwg")
+    docs = fake_app.Documents.docs
+    docs.append(other)
+    other.activated = 0
+
+    def activate():
+        other.activated += 1
+        if switches:
+            docs.insert(0, docs.pop(docs.index(other)))
+    other.Activate = activate
+    return other
+
+
+def test_activate_document_switches_tabs_only_when_autocad_is_idle(fake_app):
+    other = _second_drawing(fake_app)
+    fake_app.doc.variables["CMDACTIVE"] = 1  # the user is in a command in the active drawing
+    with pytest.raises(AcadError, match="busy"):
+        documents.activate_document("Drawing2.dwg")
+    assert other.activated == 0
+    fake_app.doc.variables["CMDACTIVE"] = 0
+    other.variables["CMDACTIVE"] = 8  # a dialog in the drawing to switch to
+    with pytest.raises(AcadError, match="not switching"):
+        documents.activate_document("Drawing2.dwg")
+    other.variables["CMDACTIVE"] = 0
+    out = documents.activate_document("drawing2.dwg")
+    assert out["active"] and out["name"] == "Drawing2.dwg" and fake_app.ActiveDocument is other
+    assert out["editable"] is False  # switching to a drawing does not unlock it
+    again = documents.activate_document("Drawing2.dwg")
+    assert again["note"] == "already the active drawing" and other.activated == 1
+    with pytest.raises(AcadError, match="No open drawing"):
+        documents.activate_document("Nope.dwg")
+
+
+def test_activate_document_reports_when_autocad_does_not_switch(fake_app):
+    _second_drawing(fake_app, switches=False)
+    with pytest.raises(AcadError, match="did not switch.*click its tab"):
+        documents.activate_document("Drawing2.dwg")
+
+
+def test_tools_for_the_active_drawing_point_to_activate_document(fake_app):
+    other = _second_drawing(fake_app)
+    session.mark_owned(other)
+    with pytest.raises(AcadError, match="not the active drawing.*activate_document"):
+        query.zoom_extents("Drawing2.dwg")
+    assert "activate_document" in documents.open_drawing.__doc__
+
+
 def test_close_refuses_user_drawings(fake_app):
     with pytest.raises(AcadError, match="not created by this server"):
         documents.close_document("Drawing1.dwg")
@@ -986,8 +1035,14 @@ def test_command_answers_cover_objects_and_selections():
     assert commands.lisp_input({"select_all": "lwpolyline,dimension"}) == \
         '(ssget "_X" (list (cons 0 "LWPOLYLINE,DIMENSION")))'
     assert commands.lisp_input(0.1) == "0.1" and commands.lisp_input(1e-7) == "0.0000001"
+    assert commands.lisp_input({"window": [[0, 0], [1, 1]]}) == \
+        '(ssget "_W" (trans (list 0.0 0.0 0.0) 0 1) (trans (list 1.0 1.0 0.0) 0 1))'
+    picked = commands.lisp_input({"handles": ["2a", "3B"], "except": "dimension"})
+    assert '(handent "2A") (handent "3B")' in picked and '(wcmatch (cdr (assoc 0 (entget e))) "DIMENSION")' in picked
+    assert _lisp_tokens(picked)[0] == 0 and picked.endswith("(ssadd))")
     for bad in ['(command "ERASE")', "!x", "'ZOOM", "a\nb", True, [1], {"handle": "zz"}, {"select_all": "A) (x"},
-                {"what": 1}]:
+                {"what": 1}, {"crossing": [[0, 0]]}, {"handles": []}, {"handles": ["zz"]},
+                {"window": [[0, 0], [1, 1]], "except": "A) (x"}, {"crossing": [[0, 0], [1, 1]], "extra": 1}]:
         with pytest.raises(ValueError):
             commands.lisp_input(bad)
 
@@ -1004,15 +1059,18 @@ def test_command_names_are_checked():
 class _FakeAutoCAD:
     """Stands in for AutoCAD's command line: writes the transcript the expression would write."""
 
-    def __init__(self, lines, never_starts=False, still_active=False, doc=None, drops=None):
+    def __init__(self, lines, never_starts=False, still_active=False, doc=None, drops=None, on_cancel=None):
         self.lines, self.never_starts, self.still_active, self.doc = lines, never_starts, still_active, doc
-        self.sent, self.path, self.drops = [], None, drops
+        self.sent, self.path, self.drops, self.on_cancel = [], None, drops, on_cancel
 
     def send(self, hwnd, text):
         import re
         self.sent.append(text)
-        if text == "\x03\x03":
-            return True  # the cancel
+        if text == "\x03\x03":  # the cancel; on_cancel: what the expression's error handler then writes
+            if self.on_cancel and self.path:
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write("\n".join(self.on_cancel) + "\n")
+            return True
         stage = re.search(r'\(open "([^"]+)" "[wa]"\)\) \(write-line "S\\t(\d+)"', text)
         if stage:  # a piece of the expression being stored: AutoCAD notes that it took it
             self.path = stage[1]
@@ -1036,6 +1094,7 @@ def command_line(fake_app, monkeypatch, tmp_path):
     monkeypatch.setattr(session, "hwnd", 1234)
     monkeypatch.setattr(commands, "RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(commands, "START_WAIT", 0.2)
+    monkeypatch.setattr(commands, "CANCEL_WAIT", 0.2)
     monkeypatch.setattr(commands, "POLL", 0.01)
     monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
     monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: False)
@@ -1117,9 +1176,49 @@ def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
 def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypatch):
     fake = command_line(_FakeAutoCAD(["B\t", "C\tx"]))  # never finishes: e.g. stuck in a dialog
     monkeypatch.setattr(commands, "describe_blockers", lambda hwnd: ' AutoCAD shows the dialog "Block".')
-    with pytest.raises(AcadError, match='did not finish.*do NOT repeat.*"Block"'):
+    with pytest.raises(AcadError, match='did not finish.*not cancelled.*do NOT repeat.*"Block"'):
         commands.run(fake_app.doc, "BCLOSE", timeout_seconds=1)
     assert fake.sent.count("(eval (read amcp:src))\n") == 1  # sent once: nothing repeated
+    assert "\x03\x03" not in fake.sent  # a dialog is the user's to answer: no Ctrl+C into it
+
+
+def test_run_command_cancels_a_command_that_does_not_finish(fake_app, command_line, monkeypatch):
+    # B3: a Block Editor action stuck at a prompt left AutoCAD refusing every call until cancel_command.
+    fake = command_line(_FakeAutoCAD(
+        ["B\t", "C\tSelect parameter:", "P\tEnter action type [Array/Move/Scale/sTretch]:"],
+        on_cancel=["X\tFunction cancelled", "U\t", "D\t0"]))
+    with pytest.raises(AcadError) as caught:
+        commands.run(fake_app.doc, "BACTION", [[1, 2], "_T"], timeout_seconds=1)
+    message = str(caught.value)
+    assert "did not finish within 1s" in message and "cancelled it" in message and "put back" in message
+    assert "[1, 2] -> 'Enter action type" in message and "AutoCAD answers again" in message
+    assert fake.sent[-1] == "\x03\x03" and fake.sent.count("(eval (read amcp:src))\n") == 1
+    assert not list(commands.RUN_DIR.iterdir())  # the transcript file is removed
+
+
+def test_run_command_says_when_autocad_still_refuses_after_the_cancel(fake_app, command_line, monkeypatch):
+    command_line(_FakeAutoCAD(["B\t", "C\tx"]))  # the cancel does not end it
+    real = fake_app.doc.GetVariable
+    calls = {"n": 0}
+
+    def refusing(name):
+        if name == "CMDACTIVE":
+            calls["n"] += 1
+            if calls["n"] > 1:  # the first is require_idle before anything is sent
+                raise AttributeError("<unknown>.GetVariable")
+        return real(name)
+    fake_app.doc.GetVariable = refusing
+    with pytest.raises(AcadError, match="cancelled it.*still does not answer: call cancel_command"):
+        commands.run(fake_app.doc, "BACTION", timeout_seconds=1, undo_on_failure=False)
+
+
+def test_run_command_does_not_cancel_in_another_drawing(fake_app, command_line, monkeypatch):
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tx"]))
+    titles = iter(["AutoCAD 2027 - [Drawing1.dwg]"])
+    monkeypatch.setattr(commands, "window_title", lambda hwnd: next(titles, "AutoCAD 2027 - [Plan.dwg]"))
+    with pytest.raises(AcadError, match="no longer the active drawing, so it was not cancelled"):
+        commands.run(fake_app.doc, "BACTION", timeout_seconds=1)
+    assert "\x03\x03" not in fake.sent
 
 
 def test_run_command_keeps_the_guards(fake_app, command_line, monkeypatch):
@@ -1263,22 +1362,69 @@ def test_linear_parameter_needs_the_editor_and_reports_failure(fake_app, monkeyp
         block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6])
 
 
+def _view(doc, centre, height, screen=(1000, 500)):
+    doc.variables.update({"VIEWCTR": (*centre, 0.0), "VIEWSIZE": height, "SCREENSIZE": screen})
+
+
 def test_stretch_action_inputs_follow_the_live_prompts(fake_app, monkeypatch):
     doc, runs = _editor(fake_app, monkeypatch, open_=True)
     zoomed = []
     fake_app.ZoomExtents = lambda: zoomed.append(True)
+    _view(doc, (30, 40), 120)  # shows x -90..150, y -20..100
     doc.variables["BACTIONBARMODE"] = 1
-    block_editor.add_stretch_action([12, -6], [[40, -10], [60, 90]])
+    out = block_editor.add_stretch_action([12, -6], [[40, -10], [60, 90]])
     (command, inputs, undo), = runs.calls
-    assert command == "BACTION" and undo and zoomed
-    assert inputs == [[12, -6], "_T", "_S", [40, -10], [60, 90], "_C", [40, -10], [60, 90], "", [12, -6]]
+    assert command == "BACTION" and undo and zoomed and out["zoom"] == "extents"
+    assert inputs == [[12, -6], "_T", "_S", [40, -10], [60, 90], {"crossing": [[40, -10], [60, 90]]}, "", [12, -6]]
     assert doc.variables["BACTIONBARMODE"] == 1  # put back
-    centre = block_editor.stretch_inputs([12, -6], [[20, -10], [28, 90]], None, "second", 0.5, None, [30, 0])
-    assert centre[-6:] == ["_R", {"select_all": "LWPOLYLINE,DIMENSION"}, "", "_M", 0.5, [30, 0]]
     own = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], {"handles": ["2A"]}, "start", None, "", None)
-    assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handle": "2A"}, "", [0, 0]]
+    assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handles": ["2A"]}, "", [0, 0]]
     with pytest.raises(ValueError):
         block_editor.stretch_inputs([0, 0], [[0, 0]], None, "second", None, None, None)
+
+
+def test_centred_stretch_answers_m_value_location_and_selects_in_the_current_space():
+    # B1: the multiplier path removed polylines and dimensions with ssget "_X" (the whole drawing, not the
+    # block being edited) and left BACTION waiting. Now they are left out of the one crossing selection.
+    centre = block_editor.stretch_inputs([12, -6], [[20, -10], [28, 90]], None, "second", 0.5, None, [30, 0])
+    assert centre[5:] == [{"crossing": [[20, -10], [28, 90]], "except": "LWPOLYLINE,DIMENSION"}, "",
+                          "_M", 0.5, [30, 0]]
+    assert not any(isinstance(a, dict) and "select_all" in a for a in centre) and "_R" not in centre
+    lisp = commands.lisp_input(centre[5])
+    assert lisp == ('(ssget "_C" (trans (list 20.0 -10.0 0.0) 0 1) (trans (list 28.0 90.0 0.0) 0 1) '
+                    '(list (cons -4 "<NOT") (cons 0 "LWPOLYLINE,DIMENSION") (cons -4 "NOT>")))')
+    assert _lisp_tokens(lisp)[0] == 0
+    plain = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], {"window": [[0, 0], [2, 2]]}, "second", 0.5, "",
+                                        None)
+    assert plain[5:] == [{"window": [[0, 0], [2, 2]]}, "", "_M", 0.5, [0, 0]]
+
+
+def test_stretch_action_explains_handles_from_outside_the_block_editor(fake_app, monkeypatch):
+    # B2, live 2026-11-18 (AMCP-LIVE-20261118-01): inside the Block Editor a model-space handle finds nothing,
+    # so BACTION stops at the selection and is put back. The error now says why.
+    found_nothing = {"completed": False, "missing_object": 6, "undone": True,
+                     "problem": "Answer 6 found nothing (no object with that handle, ...)."}
+    doc, runs = _editor(fake_app, monkeypatch, open_=True, results=[found_nothing, found_nothing])
+    fake_app.ZoomExtents = lambda: None
+    with pytest.raises(AcadError, match=r"None of the handles 7C is an object of the block being edited.*new handles"
+                                        r".*crossing"):
+        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]], select={"handles": ["7C"]})
+    (command, inputs, _), = runs.calls
+    assert inputs[block_editor.SELECTION_ANSWER - 1] == {"handles": ["7C"]}
+    with pytest.raises(AcadError, match="Adding the stretch action failed: Answer 6 found nothing"):
+        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]])  # a crossing that found nothing: plain message
+
+
+def test_stretch_action_widens_the_view_to_show_every_pick_point(fake_app, monkeypatch):
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    _view(doc, (0, 0), 20)  # shows x -20..20, y -10..10: the location at x 90 is off screen
+    out = block_editor.add_stretch_action([0, 5], [[-5, -5], [5, 15]], location=[90, 0])
+    assert out["zoom"].startswith("extents, widened")
+    (lower, upper, _) = fake_app.zoomed
+    assert lower[0] < -20 and lower[1] < -10 and upper[0] > 90 and upper[1] > 15
+    assert block_editor.pick_points([[1, 2], "_T", {"crossing": [[3, 4], [5, 6]]}, {"handles": ["2A"]}]) == \
+        [(1, 2), (3, 4), (5, 6)]
 
 
 def test_lock_attribute_positions_one_undo_step(fake_app, monkeypatch):
