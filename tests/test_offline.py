@@ -21,6 +21,7 @@ from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import (
     annotate,
+    block_authoring,
     block_editor,
     block_library,
     blocks,
@@ -2184,3 +2185,27 @@ def test_draw_tools_can_draw_on_a_sheet(fake_app, text_enums):
     assert draw.draw_line([0, 0], [1, 1], layout="Model")["space"] == "model"
     with pytest.raises(AcadError, match="No layout named 'A-101'.*Sheet1, Model"):
         draw.draw_line([0, 0], [1, 1], layout="A-101")
+
+
+# ---------- Block Editor contents (T10), visibility (T6), flip, rotation and other actions (T8) ----------
+
+
+def test_list_block_editor_objects_reads_the_editor_space(fake_app, monkeypatch):
+    # T10, live 2026-11-18 (AMCP-LIVE-20261118-02/03): inside the Block Editor, COM's ModelSpace holds the
+    # editor's objects (with new handles), parameters, grips and actions included.
+    doc, _ = _editor(fake_app, monkeypatch, open_=True)
+    circle = doc.space._add(FakeEntity(doc, "AcDbCircle"))
+    param = doc.space._add(FakeEntity(doc, "AcDbBlockLinearParameterEntity"))
+    doc.space._add(FakeEntity(doc, "AcDbBlockLinearGripEntity"))
+    action = doc.space._add(FakeEntity(doc, "AcDbBlockMoveActionEntity"))
+    out = block_authoring.list_block_editor_objects()
+    assert out["geometry"] == [{"handle": circle.Handle, "type": "Circle", "layer": "0",
+                                "bbox": [[0.0, 0.0], [1.0, 1.0]]}]
+    assert out["parameters"] == [{"handle": param.Handle, "type": "LinearParameter"}]
+    assert out["actions"] == [{"handle": action.Handle, "type": "MoveAction"}] and "grips" not in out
+    assert [g["type"] for g in block_authoring.list_block_editor_objects(["grips"])["grips"]] == ["LinearGrip"]
+    with pytest.raises(ValueError):
+        block_authoring.list_block_editor_objects(["blocks"])
+    doc.variables["BLOCKEDITOR"] = 0
+    with pytest.raises(AcadError, match="not open"):
+        block_authoring.list_block_editor_objects()
