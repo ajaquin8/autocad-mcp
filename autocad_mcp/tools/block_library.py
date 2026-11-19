@@ -153,8 +153,10 @@ def define_block(block: str, handles: list[str] | str, base_point: Point, redefi
             for item in old_items:
                 item.Delete()
             target.Origin = point(base)
-        copies = doc.CopyObjects(objects(items), target)
-        result = {"block": block, "base_point": rounded(base), "objects": len(copies or ()),
+        # Counted in the definition: through late binding CopyObjects returned a pair (the copies and the
+        # IDPairs output), so its length was 2 whatever was copied (live 2026-11-18, AMCP-LIVE-20261118-01).
+        doc.CopyObjects(objects(items), target)
+        result = {"block": block, "base_point": rounded(base), "objects": int(target.Count),
                   "redefined": existing is not None, "originals": originals}
         if space is not None:
             ref = change.add(space.InsertBlock(point(base), block, 1.0, 1.0, 1.0, 0.0))

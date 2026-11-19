@@ -1697,8 +1697,9 @@ class _Table:
                 copy.items = [i.clone(copy) for i in definition.items]
                 return copy
             return tuple(clone(d) for d in items)
-        return tuple(owner.add(i.clone(owner) if hasattr(i, "clone") else _Item(owner, i.ObjectName))
-                     for i in items)
+        copies = tuple(owner.add(i.clone(owner) if hasattr(i, "clone") else _Item(owner, i.ObjectName))
+                       for i in items)
+        return copies, ()  # late binding hands back the IDPairs output too (live 2026-11-18)
 
 
 def _library_drawing(fake_app, monkeypatch, tmp_path):
@@ -1739,11 +1740,14 @@ def _model_items(fake_app, doc):
 def test_define_block_copies_objects_into_a_new_definition(fake_app, monkeypatch, tmp_path):
     doc, _, _, _ = _library_drawing(fake_app, monkeypatch, tmp_path)
     a, b = _model_items(fake_app, doc)
-    out = block_library.define_block("Door tag", [a.Handle, b.Handle], [5, 0])
+    c = doc.space.AddLine(com.point([0, 1]), com.point([10, 1]))
+    c.OwnerID = 11
+    out = block_library.define_block("Door tag", [a.Handle, b.Handle, c.Handle], [5, 0])
     made = doc.Blocks.Item("Door tag")
-    assert out == {"block": "Door tag", "base_point": [5.0, 0.0, 0.0], "objects": 2, "redefined": False,
-                   "originals": "keep"}
-    assert made.Origin == (5.0, 0.0, 0.0) and [i.ObjectName for i in made.items] == ["AcDbLine", "AcDbCircle"]
+    assert out == {"block": "Door tag", "base_point": [5.0, 0.0, 0.0], "objects": 3, "redefined": False,
+                   "originals": "keep"}  # counted in the definition, not from CopyObjects' pair (live 2026-11-18)
+    assert made.Origin == (5.0, 0.0, 0.0) and [i.ObjectName for i in made.items] == ["AcDbLine", "AcDbCircle",
+                                                                                    "AcDbLine"]
     assert a in doc.space.items and doc.undo_log[-2:] == ["start", "end"]  # kept; one undo step
 
 
