@@ -9,6 +9,7 @@ script]]); the tools themselves are not live-verified yet.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from typing import Any
 
@@ -20,6 +21,7 @@ from ..session import session
 from . import commands
 from .blocks import apply_properties, exploded, shown_extents
 from .draw import Point
+from .entities import by_handle
 
 STRETCH = "_T"  # BACTION: [Array/Move/Scale/sTretch]; Stretch is T, not S (live 2026-11-06)
 PARAMETER_POINT = {"second": "_S", "start": "_T"}  # [sTart point/Second point]; Enter alone picks the nearest
@@ -165,6 +167,42 @@ def selection_input(select: dict | None, frame: list[Point], exclude_types: str)
     return answer
 
 
+def require_editor_handles(doc: Any, handles: list[str]) -> None:
+    """Refuse handles that are not objects of the block being edited, before BACTION starts. The
+    Block Editor gives a block's objects new handles, so handles read from model space or a sheet
+    (or from list_blocks before BEDIT) name objects outside the edited block; sent at "Select
+    objects:" they left BACTION waiting (B2, 2026-11-18)."""
+    layouts = doc.Layouts
+    spaces = {}
+    for i in range(layouts.Count):
+        with contextlib.suppress(pywintypes.com_error, AttributeError):
+            layout = layouts.Item(i)
+            spaces[int(layout.Block.ObjectID)] = str(layout.Name)
+    outside, missing = [], []
+    for handle in handles:
+        try:
+            obj = by_handle(doc, handle)
+        except AcadError:
+            missing.append(str(handle))
+            continue
+        try:
+            owner = int(obj.OwnerID)
+        except (pywintypes.com_error, AttributeError, TypeError, ValueError):
+            continue  # cannot tell: let AutoCAD decide
+        if owner in spaces:
+            outside.append(f"{handle} ({spaces[owner]})")
+    if missing or outside:
+        parts = []
+        if outside:
+            parts.append(f"{', '.join(outside)} {'is' if len(outside) == 1 else 'are'} in model space or a sheet, "
+                         "not in the block being edited")
+        if missing:
+            parts.append(f"no object has handle {', '.join(missing)}")
+        raise AcadError("; ".join(parts) + ". The Block Editor gives a block's objects new handles, so handles "
+                        'from outside it do not work there. Select with {"crossing": [p1, p2]} or '
+                        '{"window": [p1, p2]} in block coordinates instead.')
+
+
 def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | None, end: str,
                    multiplier: float | None, exclude_types: str | None, location: Point | None) -> list:
     if end not in PARAMETER_POINT:
@@ -247,7 +285,8 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
         parameter_pick: [x, y] on the parameter's line.
         frame: stretch frame corners [[x1, y1], [x2, y2]].
         select: {"crossing": [p1, p2]} (default: crossing the frame), {"window": [p1, p2]},
-            or {"handles": [...]}.
+            or {"handles": [...]} of objects INSIDE the Block Editor: it gives a block's
+            objects new handles, so handles from model space or a sheet are refused.
         end: which parameter point drives it, "second" (the grip end, default) or "start".
         multiplier: distance multiplier, e.g. 0.5 for centred items (default 1).
         exclude_types: DXF types left out of the selection, e.g. "LWPOLYLINE,DIMENSION";
@@ -258,6 +297,8 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
     inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location)
     doc = session.document(name)
     require_editor(doc, True)
+    if select and "handles" in select:
+        require_editor_handles(doc, [str(h) for h in select["handles"]])
     zoom = show_points(doc, pick_points(inputs))
     old_mode = doc.GetVariable("BACTIONBARMODE")
     doc.SetVariable("BACTIONBARMODE", 0)  # the prompt order above; put back afterwards
