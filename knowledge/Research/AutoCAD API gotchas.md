@@ -175,6 +175,12 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **verified:** a solid hatch reaches the PDF as triangle pairs, each filled and stroked with a zero-width line. The strokes hide seams between the triangles but are drawn one pixel wide and not anti-aliased, so small solid fills (a logo) have hard, stepped edges on screen at any driver resolution. Text in a TrueType font is written as real glyphs and stays sharp.
 - **inferred:** an MCP host can drop a tool argument called `device`. `set_page_setup` and `plot_pdf` take `plot_device`.
 
+## 2026-11-18: Block Editor hangs reported from the 2026-11-16 to 18 sessions
+- **user-reported:** `add_stretch_action` with `multiplier` left BACTION waiting four times, while the same action through `run_command` (`_M`, the value, the location) worked. Handles taken in model space also left it waiting. After either, every call failed as busy until `cancel_command`.
+- **inferred:** `(ssget "_X" ...)` selects in the whole drawing database (model space and every layout), not in the block being edited, so it is the wrong tool for removing objects inside the Block Editor. `(ssget "_C" p1 p2 filter)` selects in the current space and only what is on screen.
+- **inferred:** the Block Editor gives a block's objects new handles; handles read outside it name other objects. An object's `OwnerID` equal to a layout's `Block.ObjectID` means it is in model space or on a sheet.
+- **unresolved:** whether two Ctrl+C sent while an expression is stuck inside `(command ...)` makes its `*error*` handler run (UNDO Back, transcript finished), as `run_command` now expects. Check in the next live batch.
+
 ## 2026-11-18: text justification over COM (T5; not live-verified)
 - **documented / inferred:** a TEXT or ATTDEF is justified by setting `Alignment` (AcAlignment) and then `TextAlignmentPoint`; `InsertionPoint` is then computed by AutoCAD. Fit and Aligned need two points and are left out of `justify`.
 - **unresolved:** whether setting an MTEXT's `AttachmentPoint` keeps `InsertionPoint` where it was (`add_mtext` sets it again afterwards to be sure).

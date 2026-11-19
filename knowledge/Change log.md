@@ -298,6 +298,15 @@ Writer: Claude, in a Claude desktop session, on Alex's go ("Lets do it"). Branch
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], Tool reference.
 - 2026-11-13: version 0.1.8 in `pyproject.toml` and `app.py`, on Alex's go ("Okay lets push it"), so a bundle with this change can be told apart from the installed 0.1.7. Still **not verified** through an installed bundle.
 
+## 2026-11-18: activate_document and the Block Editor hangs (T1, B1 to B3)
+Writer: Claude Code, on the user's request to work through the improvement list compiled from the 2026-11-16 to 18 working sessions (step 1: T1 and B1 to B3). Branch `fix/activate-and-hangs`, one commit per item. The list itself stays out of the repository.
+- **T1:** new tool `activate_document` (Document.Activate, AutoCAD 2027 ActiveX reference): switches the active drawing, refused while a command, prompt or dialog is active, does not unlock the drawing. The "not the active drawing" errors in `run_command`, `zoom_extents` and `add_viewport` now share one message pointing to it; `open_drawing` points to it for a drawing already open (B9).
+- **B1:** `add_stretch_action` with a multiplier left BACTION waiting (user-reported). **inferred cause:** its default Remove step for polylines and dimensions used `ssget "_X"`, which reaches the whole drawing, not the block being edited. The selection is now one set built in the current space (`{"crossing"/"window"/"handles": ..., "except": "TYPES"}`, also new answers for `run_command`), and the view is widened when a pick point is off screen (E3).
+- **B2:** handles from model space or a sheet are refused before BACTION starts (owner compared with the layouts' blocks).
+- **B3:** a `run_command` expression that does not finish in time is cancelled by the server (not while a dialog shows), and the error lists the prompts it got through and whether AutoCAD answers again.
+- Tests: 9 new offline tests (128 in total); the five checks of `scripts\check.ps1` pass (run one by one: the script itself is blocked by this PC's PowerShell execution policy). **Nothing here is live-verified**; B1 and B2 are fixes for an inferred cause.
+- Updated: [[Research/AutoCAD API gotchas]], Tool reference.
+
 ## 2026-11-18: text justification and style; which space drawing tools use (T5, B6)
 Writer: Claude Code, on the user's go ("Continue to T5, B6"), step 3 of the improvement list. Branch `feat/text-and-space` (from `main`), one commit per item.
 - **T5:** `add_text` and `add_attribute_definition` take `justify` (13 justifications, or TL, MC, BR ...) and `style`; `add_mtext` takes `attachment` and `style`. With a justification, `position` is the justification point. Unknown styles are refused with the drawing's list.

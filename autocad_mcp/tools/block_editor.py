@@ -143,19 +143,33 @@ def add_linear_parameter(label: str, start: Point, end: Point, label_location: P
     return {"label": label, "pick_point": pick, "steps": result["steps"]}
 
 
-def selection_inputs(select: dict | None, frame: list[Point]) -> list:
-    """Answers for "Select objects:" from {"crossing": [p1, p2]}, {"window": [p1, p2]} or
-    {"handles": [...]}; default: a crossing window the size of the stretch frame."""
+def selection_input(select: dict | None, frame: list[Point], exclude_types: str) -> dict:
+    """The answer for "Select objects:": ONE selection set built in AutoCAD (run_command's
+    {"crossing"/"window"/"handles": ..., "except": ...}). Default: a crossing window the size of the
+    stretch frame. Excluded types are left out of that same set, in the current space only: the
+    old Remove step used ssget "_X", which reaches the whole drawing, not the block being edited
+    (B1, 2026-11-18: the multiplier path, which removed by default, left BACTION waiting)."""
     select = select or {"crossing": frame}
-    if set(select) == {"crossing"} or set(select) == {"window"}:
-        kind = next(iter(select))
+    kind = next(iter(select)) if len(select) == 1 else None
+    if kind in ("crossing", "window"):
         corners = select[kind]
         if len(corners) != 2:
             raise ValueError(f"{kind} takes two corners [[x1, y1], [x2, y2]].")
-        return ["_C" if kind == "crossing" else "_W", list(corners[0]), list(corners[1])]
-    if set(select) == {"handles"} and select["handles"]:
-        return [{"handle": h} for h in select["handles"]]
-    raise ValueError('select is {"crossing": [p1, p2]}, {"window": [p1, p2]} or {"handles": [...]}.')
+        answer: dict = {kind: [list(corners[0]), list(corners[1])]}
+    elif kind == "handles" and select["handles"]:
+        answer = {"handles": [str(h) for h in select["handles"]]}
+    else:
+        raise ValueError('select is {"crossing": [p1, p2]}, {"window": [p1, p2]} or {"handles": [...]}.')
+    if exclude_types:
+        answer["except"] = exclude_types
+    return answer
+
+
+SELECTION_ANSWER = 6  # answer number of the selection in stretch_inputs (1-based, as run_command counts)
+OUTSIDE_HANDLES = ("None of the handles {handles} is an object of the block being edited, so the stretch action was "
+                   "not added (the command was stopped and put back). The Block Editor gives a block's objects new "
+                   "handles: handles read in model space, on a sheet or before BEDIT do not work there. Select with "
+                   '{{"crossing": [p1, p2]}} or {{"window": [p1, p2]}} in block coordinates instead.')
 
 
 def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | None, end: str,
@@ -167,14 +181,58 @@ def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | Non
     if exclude_types is None:
         exclude_types = CENTRE_EXCLUDE if multiplier not in (None, 1) else ""
     inputs: list = [list(parameter_pick), STRETCH, PARAMETER_POINT[end], list(frame[0]), list(frame[1])]
-    inputs += selection_inputs(select, frame)
-    if exclude_types:
-        inputs += ["_R", {"select_all": exclude_types}]
-    inputs.append("")  # end the selection
+    inputs += [selection_input(select, frame, exclude_types), ""]  # Enter ends the selection
     if multiplier not in (None, 1):
+        # "Specify action location or [Multiplier/Offset]": M, the value, then the location (the order that
+        # worked through run_command in the 2026-11-16 to 18 sessions, user-reported).
         inputs += ["_M", float(multiplier)]
     inputs.append(list(location if location is not None else parameter_pick))
     return inputs
+
+
+def pick_points(inputs: list) -> list[tuple[float, float]]:
+    """Every point in the answers that AutoCAD picks on screen: bare points and selection corners."""
+    found: list[tuple[float, float]] = []
+    for answer in inputs:
+        if isinstance(answer, (list, tuple)):
+            found.append(xyz(answer)[:2])
+        elif isinstance(answer, dict):
+            for kind in ("crossing", "window"):
+                found += [xyz(p)[:2] for p in answer.get(kind, [])]
+    return found
+
+
+def visible_window(doc: Any) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """The current view as WCS corners, from VIEWCTR, VIEWSIZE and SCREENSIZE (assumes the World UCS,
+    which the Block Editor uses); None if AutoCAD does not say."""
+    try:
+        cx, cy = (float(v) for v in tuple(doc.GetVariable("VIEWCTR"))[:2])
+        height = float(doc.GetVariable("VIEWSIZE"))
+        sw, sh = (float(v) for v in tuple(doc.GetVariable("SCREENSIZE"))[:2])
+    except (TypeError, ValueError, pywintypes.com_error):
+        return None
+    if height <= 0 or sw <= 0 or sh <= 0:
+        return None
+    half_w, half_h = height * sw / sh / 2, height / 2
+    return (cx - half_w, cy - half_h), (cx + half_w, cy + half_h)
+
+
+def show_points(doc: Any, points: list[tuple[float, float]], margin: float = 0.1) -> str:
+    """Zoom to extents, then widen the view if a pick point is still off screen: picks and crossing
+    windows only find what is on screen, and an off-screen pick left BACTION waiting (E3)."""
+    session.app.ZoomExtents()
+    view = visible_window(doc)
+    if not points:
+        return "extents"
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    if view is not None:
+        (vx1, vy1), (vx2, vy2) = view
+        if min(xs) >= vx1 and max(xs) <= vx2 and min(ys) >= vy1 and max(ys) <= vy2:
+            return "extents"
+        xs, ys = xs + [vx1, vx2], ys + [vy1, vy2]
+    pad = max(max(xs) - min(xs), max(ys) - min(ys), 1.0) * margin
+    session.app.ZoomWindow(point([min(xs) - pad, min(ys) - pad]), point([max(xs) + pad, max(ys) + pad]))
+    return "extents, widened to show every pick point"
 
 
 @acad_tool()
@@ -182,12 +240,13 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
                        end: str = "second", multiplier: float | None = None, exclude_types: str | None = None,
                        location: Point | None = None, name: str = "") -> dict:
     """Add a stretch action in the open Block Editor (BACTION Stretch) to the parameter
-    drawn through parameter_pick (use pick_point from add_linear_parameter; it must be on
-    screen, so the view is zoomed to extents first). Objects with points inside `frame` are
-    stretched; other selected objects are MOVED, so select only what should follow.
+    drawn through parameter_pick (use pick_point from add_linear_parameter). Picks only
+    find what is on screen, so the view is zoomed to extents first and widened if a pick
+    point, frame corner or the location is still off screen. Objects with points inside
+    `frame` are stretched; other selected objects are MOVED, so select only what should follow.
 
     For a centred item that moves half the distance, pass multiplier 0.5: polylines and
-    dimensions are then removed from the selection by default (they would move by half).
+    dimensions are then left out of the selection by default (they would move by half).
     Lock attribute positions first (lock_attribute_positions), or attribute definitions
     are left out of the selection.
 
@@ -195,10 +254,12 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
         parameter_pick: [x, y] on the parameter's line.
         frame: stretch frame corners [[x1, y1], [x2, y2]].
         select: {"crossing": [p1, p2]} (default: crossing the frame), {"window": [p1, p2]},
-            or {"handles": [...]}.
+            or {"handles": [...]} of objects INSIDE the Block Editor: it gives a block's
+            objects new handles, so handles from model space or a sheet find nothing (the
+            action is then not added, and the error says why).
         end: which parameter point drives it, "second" (the grip end, default) or "start".
         multiplier: distance multiplier, e.g. 0.5 for centred items (default 1).
-        exclude_types: DXF types removed from the selection, e.g. "LWPOLYLINE,DIMENSION";
+        exclude_types: DXF types left out of the selection, e.g. "LWPOLYLINE,DIMENSION";
             "" for none (default: those two when multiplier is not 1, else none).
         location: where the action's badge goes (default: parameter_pick).
         name: which drawing; it must be the active one (default: active).
@@ -206,14 +267,20 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
     inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location)
     doc = session.document(name)
     require_editor(doc, True)
-    session.app.ZoomExtents()  # a pick only selects what is on screen
+    zoom = show_points(doc, pick_points(inputs))
     old_mode = doc.GetVariable("BACTIONBARMODE")
     doc.SetVariable("BACTIONBARMODE", 0)  # the prompt order above; put back afterwards
     try:
-        result = run_checked(doc, "Adding the stretch action", "BACTION", inputs)
+        result = commands.run(doc, "BACTION", inputs)
     finally:
         doc.SetVariable("BACTIONBARMODE", old_mode)
-    return {"steps": result["steps"], "inputs_used": result["inputs_used"]}
+    if not result["completed"]:
+        if select and "handles" in select and result.get("missing_object") == SELECTION_ANSWER:
+            # B2: inside the Block Editor, (handent) of a handle from outside it gives nothing, so the selection
+            # is empty and the command is stopped there (verified live 2026-11-18, AMCP-LIVE-20261118-01).
+            raise AcadError(OUTSIDE_HANDLES.format(handles=", ".join(str(h) for h in select["handles"])))
+        raise failed("Adding the stretch action", result)
+    return {"steps": result["steps"], "inputs_used": result["inputs_used"], "zoom": zoom}
 
 
 @acad_tool()
