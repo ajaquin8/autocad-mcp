@@ -49,6 +49,11 @@ Block libraries: define_block makes (or redefines) a block from objects and a ba
 import_blocks brings definitions in from a library drawing, and with overwrite=True
 replaces same-named ones and switches their references.
 
+Dynamic blocks: open_block_editor -> list_block_editor_objects (handles that work in the
+editor) -> add_linear_parameter / add_visibility_parameter / add_flip_parameter /
+add_rotation_parameter -> add_stretch_action / add_action / visibility_state /
+set_object_visibility -> close_block_editor -> check_dynamic_block.
+
 If AutoCAD keeps rejecting calls because a command or prompt the server started
 is still open in a server-created drawing, cancel_command cancels it there. It
 never acts in the user's drawings; if the user is busy, ask them instead. When a

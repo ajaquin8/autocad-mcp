@@ -117,29 +117,62 @@ def close_block_editor(save: bool = True, name: str = "") -> dict:
     return {"saved": save, "block_editor_open": False, "steps": steps}
 
 
+def plain_number(value: float) -> str:
+    return format(float(value), ".10g")
+
+
+def value_set_inputs(value_list: list[float] | None, increment: dict | None) -> list:
+    """The Value set answers at BPARAMETER's first prompt (live 2026-11-18, AMCP-LIVE-20261118-03):
+    _V, then [None/List/Increment]; a list is one comma-separated answer, an increment asks for the
+    step, the minimum and the maximum in that order."""
+    if value_list and increment:
+        raise ValueError("Give value_list or increment, not both.")
+    if value_list:
+        values = [float(v) for v in value_list]
+        text = ",".join(plain_number(v) for v in values)
+        if len(text) > commands.MAX_TEXT:
+            raise ValueError(f"The value list is too long for one answer ({len(text)} characters).")
+        return ["_V", "_L", text]
+    if increment:
+        if set(increment) != {"step", "min", "max"}:
+            raise ValueError('increment is {"step": ..., "min": ..., "max": ...}.')
+        step, low, high = (float(increment[k]) for k in ("step", "min", "max"))
+        if step <= 0 or low > high:
+            raise ValueError("increment needs a positive step and min <= max.")
+        return ["_V", "_I", step, low, high]
+    return []
+
+
 @acad_tool()
 def add_linear_parameter(label: str, start: Point, end: Point, label_location: Point, grips: int = 1,
+                         value_list: list[float] | None = None, increment: dict | None = None,
                          name: str = "") -> dict:
     """Add a linear parameter in the open Block Editor (BPARAMETER Linear): the distance
     property users see as `label` (e.g. "Width"), measured from start to end, with its
     line through label_location. One grip (the default) sits at the end point.
-    Returns "pick_point", a point on the parameter's line for add_stretch_action.
+    Returns "pick_point", a point on the parameter's line for add_stretch_action and
+    add_action. A value set limits the sizes users can pick: a list, or an increment
+    between a minimum and a maximum. Include the drawn length in it.
 
     Args:
         label: property name shown to users, e.g. "Width" or "Height".
         start, end: [x, y] in the block's coordinates (the Block Editor's WCS).
         label_location: where the parameter's line and label go (like a dimension line).
         grips: number of grips, 0, 1 or 2 (default 1, at the end point).
+        value_list: allowed distances, e.g. [24, 30, 36] (default: any).
+        increment: allowed distances as {"step": 6, "min": 24, "max": 48} (default: any).
         name: which drawing; it must be the active one (default: active).
     """
     if grips not in (0, 1, 2):
         raise ValueError("grips is 0, 1 or 2.")
+    values = value_set_inputs(value_list, increment)
     pick = parameter_pick_point(start, end, label_location)
     doc = session.document(name)
     require_editor(doc, True)
-    # [Name/Label/...]: Label sets the property name; the number of grips comes last (live 2026-11-06).
+    # [Name/Label/.../Value set]: Label sets the property name, Value set the allowed sizes, both before the
+    # start point; the number of grips comes last (live 2026-11-06 and 2026-11-18).
     result = run_checked(doc, f"Adding the linear parameter '{label}'", "BPARAMETER",
-                         ["_L", "_L", label, list(start), list(end), list(label_location), str(grips)])
+                         ["_L", "_L", label, *values, list(start), list(end), list(label_location), str(grips)])
     return {"label": label, "pick_point": pick, "steps": result["steps"]}
 
 
@@ -166,14 +199,26 @@ def selection_input(select: dict | None, frame: list[Point], exclude_types: str)
 
 
 SELECTION_ANSWER = 6  # answer number of the selection in stretch_inputs (1-based, as run_command counts)
-OUTSIDE_HANDLES = ("None of the handles {handles} is an object of the block being edited, so the stretch action was "
+OUTSIDE_HANDLES = ("None of the handles {handles} is an object of the block being edited, so the action was "
                    "not added (the command was stopped and put back). The Block Editor gives a block's objects new "
                    "handles: handles read in model space, on a sheet or before BEDIT do not work there. Select with "
                    '{{"crossing": [p1, p2]}} or {{"window": [p1, p2]}} in block coordinates instead.')
 
 
+def location_inputs(multiplier: float | None, offset: float | None, location: Point) -> list:
+    """The end of a move or stretch: "Specify action location or [Multiplier/Offset]" takes M and its
+    value, O and the angle ("Enter angle offset <0>", live 2026-11-18), then the location."""
+    inputs: list = []
+    if multiplier not in (None, 1):
+        inputs += ["_M", float(multiplier)]
+    if offset:
+        inputs += ["_O", float(offset)]
+    return inputs + [list(location)]
+
+
 def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | None, end: str,
-                   multiplier: float | None, exclude_types: str | None, location: Point | None) -> list:
+                   multiplier: float | None, exclude_types: str | None, location: Point | None,
+                   offset: float | None = None) -> list:
     if end not in PARAMETER_POINT:
         raise ValueError('end is "second" or "start".')
     if len(frame) != 2:
@@ -182,12 +227,9 @@ def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | Non
         exclude_types = CENTRE_EXCLUDE if multiplier not in (None, 1) else ""
     inputs: list = [list(parameter_pick), STRETCH, PARAMETER_POINT[end], list(frame[0]), list(frame[1])]
     inputs += [selection_input(select, frame, exclude_types), ""]  # Enter ends the selection
-    if multiplier not in (None, 1):
-        # "Specify action location or [Multiplier/Offset]": M, the value, then the location (the order that
-        # worked through run_command in the 2026-11-16 to 18 sessions, user-reported).
-        inputs += ["_M", float(multiplier)]
-    inputs.append(list(location if location is not None else parameter_pick))
-    return inputs
+    # M and its value, then the location: the order that worked through run_command in the 2026-11-16 to 18
+    # sessions (user-reported) and in AMCP-LIVE-20261118-01.
+    return inputs + location_inputs(multiplier, offset, location if location is not None else parameter_pick)
 
 
 def pick_points(inputs: list) -> list[tuple[float, float]]:
@@ -235,10 +277,31 @@ def show_points(doc: Any, points: list[tuple[float, float]], margin: float = 0.1
     return "extents, widened to show every pick point"
 
 
+def run_action(doc: Any, what: str, inputs: list, select: dict | None) -> dict:
+    """BACTION with these answers: view widened to show every pick, BACTIONBARMODE 0 for the prompt order
+    (put back afterwards), and a clear error when handles from outside the Block Editor find nothing."""
+    require_editor(doc, True)
+    zoom = show_points(doc, pick_points(inputs))
+    old_mode = doc.GetVariable("BACTIONBARMODE")
+    doc.SetVariable("BACTIONBARMODE", 0)
+    try:
+        result = commands.run(doc, "BACTION", inputs)
+    finally:
+        doc.SetVariable("BACTIONBARMODE", old_mode)
+    if not result["completed"]:
+        answer = next((i + 1 for i, a in enumerate(inputs) if isinstance(a, dict)), None)
+        if select and "handles" in select and answer is not None and result.get("missing_object") == answer:
+            # B2: inside the Block Editor, (handent) of a handle from outside it gives nothing, so the selection
+            # is empty and the command is stopped there (verified live 2026-11-18, AMCP-LIVE-20261118-01).
+            raise AcadError(OUTSIDE_HANDLES.format(handles=", ".join(str(h) for h in select["handles"])))
+        raise failed(what, result)
+    return {"steps": result["steps"], "inputs_used": result["inputs_used"], "zoom": zoom}
+
+
 @acad_tool()
 def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict | None = None,
                        end: str = "second", multiplier: float | None = None, exclude_types: str | None = None,
-                       location: Point | None = None, name: str = "") -> dict:
+                       location: Point | None = None, offset: float | None = None, name: str = "") -> dict:
     """Add a stretch action in the open Block Editor (BACTION Stretch) to the parameter
     drawn through parameter_pick (use pick_point from add_linear_parameter). Picks only
     find what is on screen, so the view is zoomed to extents first and widened if a pick
@@ -262,25 +325,12 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
         exclude_types: DXF types left out of the selection, e.g. "LWPOLYLINE,DIMENSION";
             "" for none (default: those two when multiplier is not 1, else none).
         location: where the action's badge goes (default: parameter_pick).
+        offset: angle offset in degrees, e.g. 90 to stretch at right angles to the
+            parameter (default 0).
         name: which drawing; it must be the active one (default: active).
     """
-    inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location)
-    doc = session.document(name)
-    require_editor(doc, True)
-    zoom = show_points(doc, pick_points(inputs))
-    old_mode = doc.GetVariable("BACTIONBARMODE")
-    doc.SetVariable("BACTIONBARMODE", 0)  # the prompt order above; put back afterwards
-    try:
-        result = commands.run(doc, "BACTION", inputs)
-    finally:
-        doc.SetVariable("BACTIONBARMODE", old_mode)
-    if not result["completed"]:
-        if select and "handles" in select and result.get("missing_object") == SELECTION_ANSWER:
-            # B2: inside the Block Editor, (handent) of a handle from outside it gives nothing, so the selection
-            # is empty and the command is stopped there (verified live 2026-11-18, AMCP-LIVE-20261118-01).
-            raise AcadError(OUTSIDE_HANDLES.format(handles=", ".join(str(h) for h in select["handles"])))
-        raise failed("Adding the stretch action", result)
-    return {"steps": result["steps"], "inputs_used": result["inputs_used"], "zoom": zoom}
+    inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location, offset)
+    return run_action(session.document(name), "Adding the stretch action", inputs, select)
 
 
 @acad_tool()

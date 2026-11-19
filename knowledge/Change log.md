@@ -325,3 +325,13 @@ Writer: Claude Code, on the user's go ("Saved, go").
 - Ran `tests/live/improvements_check.py` (added here) from a local branch merging the three fix branches: 70 of 72 checks ([[Sources/2026-11-18 Improvement list live check]]).
 - Fixed the two failures the same day, each on its own branch: `define_block` reported the wrong object count (`feat/block-library`); the B2 owner pre-check did not work inside the Block Editor and was replaced by a clear error from what AutoCAD does (`fix/activate-and-hangs`). Both offline-tested only.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]].
+
+## 2026-11-18: dynamic block tools (T6 to T10)
+Writer: Claude Code, on the user's go ("Continue to T6–T10", then "Saved, go" for each live run). Branch `feat/dynamic-block-tools`, one commit per item.
+- Discovery runs first, to record AutoCAD's real prompts ([[Sources/2026-11-18 Dynamic block tools live runs]]).
+- **T10:** `list_block_editor_objects` (geometry, parameters, actions, grips, with handles that work in the Block Editor).
+- **T7:** `value_list` and `increment` on `add_linear_parameter`. **T9:** `offset` on `add_stretch_action` (and on move actions).
+- **T6:** `add_visibility_parameter`, `visibility_state` (new/set/delete), `set_object_visibility`.
+- **T8:** `add_flip_parameter`, `add_rotation_parameter`, `add_action` (move, scale, flip, rotate). New module `autocad_mcp/tools/block_authoring.py`.
+- **run_command:** looks a second time for a prompt left open after a command (seen once after `SELECT`).
+- Tests: 150 offline; live 41 of 41 on the last verification run (AMCP-LIVE-20261118-05).

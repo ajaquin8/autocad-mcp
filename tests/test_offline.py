@@ -21,6 +21,7 @@ from autocad_mcp.server import mcp
 from autocad_mcp.session import Session, doc_key, product_name, session
 from autocad_mcp.tools import (
     annotate,
+    block_authoring,
     block_editor,
     block_library,
     blocks,
@@ -1095,6 +1096,7 @@ def command_line(fake_app, monkeypatch, tmp_path):
     monkeypatch.setattr(commands, "RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(commands, "START_WAIT", 0.2)
     monkeypatch.setattr(commands, "CANCEL_WAIT", 0.2)
+    monkeypatch.setattr(commands, "AFTER_WAIT", 0)
     monkeypatch.setattr(commands, "POLL", 0.01)
     monkeypatch.setattr(commands, "window_title", lambda hwnd: "AutoCAD 2026 - [Drawing1.dwg]")
     monkeypatch.setattr(commands, "is_system_variable", lambda doc, name: False)
@@ -1171,6 +1173,23 @@ def test_run_command_cancels_a_command_left_waiting(fake_app, command_line):
     fake = command_line(_FakeAutoCAD(["B\t", "C\tx", "D\t1"], still_active=True, doc=fake_app.doc))
     out = commands.run(fake_app.doc, "LINE")
     assert out["cancelled_afterwards"] and fake.sent[-1] == "\x03\x03"
+
+
+def test_run_command_looks_again_for_a_prompt_that_comes_back(fake_app, command_line):
+    # Live 2026-11-18 (AMCP-LIVE-20261118-02): SELECT in the Block Editor ended, AutoCAD answered, and a moment
+    # later it was waiting at a prompt again; every later call was refused until cancel_command.
+    fake = command_line(_FakeAutoCAD(["B\t", "C\tSelect objects:", "P\tSelect objects:", "D\t0"]))
+    real, calls = fake_app.doc.GetVariable, {"n": 0}
+
+    def comes_back(var):
+        if var == "CMDACTIVE":
+            calls["n"] += 1
+            return 1 if calls["n"] >= 3 else 0  # idle before sending and at the first look, waiting at the second
+        return real(var)
+    fake_app.doc.GetVariable = comes_back
+    out = commands.run(fake_app.doc, "SELECT", [{"handle": "8A"}], undo_on_failure=False)
+    assert out["completed"] and out["cancelled_afterwards"] and fake.sent[-1] == "\x03\x03"
+    assert "waiting at a prompt again" in out["problem"]
 
 
 def test_run_command_gives_up_without_repeating(fake_app, command_line, monkeypatch):
@@ -1351,6 +1370,22 @@ def test_linear_parameter_answers_in_the_live_order(fake_app, monkeypatch):
         block_editor.add_linear_parameter("Width", [0, 0], [48, 0], [24, -6], grips=3)
 
 
+def test_linear_parameter_value_sets_follow_the_live_prompts(fake_app, monkeypatch):
+    # T7, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03): Value set comes before the start point.
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    block_editor.add_linear_parameter("Width", [0, 0], [60, 0], [30, -6], value_list=[48, 60, 72.5])
+    block_editor.add_linear_parameter("Height", [0, 0], [0, 84], [-6, 42], increment={"step": 6, "min": 72, "max": 96})
+    (_, listed, _), (_, stepped, _) = runs.calls
+    assert listed == ["_L", "_L", "Width", "_V", "_L", "48,60,72.5", [0, 0], [60, 0], [30, -6], "1"]
+    assert stepped == ["_L", "_L", "Height", "_V", "_I", 6.0, 72.0, 96.0, [0, 0], [0, 84], [-6, 42], "1"]
+    for bad in [{"value_list": [1], "increment": {"step": 1, "min": 0, "max": 2}},
+                {"increment": {"step": 0, "min": 0, "max": 2}}, {"increment": {"step": 1, "min": 3, "max": 2}},
+                {"increment": {"step": 1}}]:
+        with pytest.raises(ValueError):
+            block_editor.add_linear_parameter("W", [0, 0], [1, 0], [0, -1], **bad)
+    assert len(runs.calls) == 2  # nothing sent for the bad ones
+
+
 def test_linear_parameter_needs_the_editor_and_reports_failure(fake_app, monkeypatch):
     _editor(fake_app, monkeypatch, open_=False)
     with pytest.raises(AcadError, match="not open"):
@@ -1381,6 +1416,18 @@ def test_stretch_action_inputs_follow_the_live_prompts(fake_app, monkeypatch):
     assert own == [[0, 0], "_T", "_T", [0, 0], [1, 1], {"handles": ["2A"]}, "", [0, 0]]
     with pytest.raises(ValueError):
         block_editor.stretch_inputs([0, 0], [[0, 0]], None, "second", None, None, None)
+
+
+def test_stretch_angle_offset_goes_before_the_location(fake_app, monkeypatch):
+    # T9, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03): O, then "Enter angle offset <0>", then location.
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    block_editor.add_stretch_action([15, -6], [[55, -10], [70, 94]], offset=90, location=[65, -20])
+    (_, inputs, _), = runs.calls
+    assert inputs[-3:] == ["_O", 90.0, [65, -20]]
+    both = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], None, "second", 0.5, "", [2, 2], 45)
+    assert both[-5:] == ["_M", 0.5, "_O", 45.0, [2, 2]]
+    assert "_O" not in block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], None, "second", None, "", None, 0)
 
 
 def test_centred_stretch_answers_m_value_location_and_selects_in_the_current_space():
@@ -2138,3 +2185,98 @@ def test_draw_tools_can_draw_on_a_sheet(fake_app, text_enums):
     assert draw.draw_line([0, 0], [1, 1], layout="Model")["space"] == "model"
     with pytest.raises(AcadError, match="No layout named 'A-101'.*Sheet1, Model"):
         draw.draw_line([0, 0], [1, 1], layout="A-101")
+
+
+# ---------- Block Editor contents (T10), visibility (T6), flip, rotation and other actions (T8) ----------
+
+
+def test_list_block_editor_objects_reads_the_editor_space(fake_app, monkeypatch):
+    # T10, live 2026-11-18 (AMCP-LIVE-20261118-02/03): inside the Block Editor, COM's ModelSpace holds the
+    # editor's objects (with new handles), parameters, grips and actions included.
+    doc, _ = _editor(fake_app, monkeypatch, open_=True)
+    circle = doc.space._add(FakeEntity(doc, "AcDbCircle"))
+    param = doc.space._add(FakeEntity(doc, "AcDbBlockLinearParameterEntity"))
+    doc.space._add(FakeEntity(doc, "AcDbBlockLinearGripEntity"))
+    action = doc.space._add(FakeEntity(doc, "AcDbBlockMoveActionEntity"))
+    out = block_authoring.list_block_editor_objects()
+    assert out["geometry"] == [{"handle": circle.Handle, "type": "Circle", "layer": "0",
+                                "bbox": [[0.0, 0.0], [1.0, 1.0]]}]
+    assert out["parameters"] == [{"handle": param.Handle, "type": "LinearParameter"}]
+    assert out["actions"] == [{"handle": action.Handle, "type": "MoveAction"}] and "grips" not in out
+    assert [g["type"] for g in block_authoring.list_block_editor_objects(["grips"])["grips"]] == ["LinearGrip"]
+    with pytest.raises(ValueError):
+        block_authoring.list_block_editor_objects(["blocks"])
+    doc.variables["BLOCKEDITOR"] = 0
+    with pytest.raises(AcadError, match="not open"):
+        block_authoring.list_block_editor_objects()
+
+
+def test_visibility_tools_follow_the_live_prompts(fake_app, monkeypatch):
+    # T6, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03).
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    block_authoring.add_visibility_parameter([80, 90], "Size")
+    block_authoring.visibility_state("new", "36 in")
+    block_authoring.visibility_state("new", "48 in", new_state_shows="show_all")
+    block_authoring.visibility_state("set", "36 in")
+    block_authoring.visibility_state("delete", "48 in")
+    block_authoring.set_object_visibility({"crossing": [[24, 36], [36, 48]]}, visible=False)
+    block_authoring.set_object_visibility({"handles": ["8A"]}, visible=True, all_states=True)
+    assert [(c, i) for c, i, _ in runs.calls] == [
+        ("BPARAMETER", ["_V", "_L", "Size", [80, 90], "1"]),
+        ("-BVSTATE", ["_N", "36 in", "_C"]),
+        ("-BVSTATE", ["_N", "48 in", "_S"]),
+        ("-BVSTATE", ["_S", "36 in"]),
+        ("-BVSTATE", ["_D", "48 in"]),
+        ("BVHIDE", [{"crossing": [[24, 36], [36, 48]]}, "", "_C"]),
+        ("BVSHOW", [{"handles": ["8A"]}, "", "_A"]),
+    ]
+    for bad in [lambda: block_authoring.visibility_state("rename", "x"),
+                lambda: block_authoring.visibility_state("new", " "),
+                lambda: block_authoring.visibility_state("new", "x", new_state_shows="some"),
+                lambda: block_authoring.add_visibility_parameter([0, 0], grips=2),
+                lambda: block_authoring.set_object_visibility({"crossing": [[0, 0]]}, visible=True)]:
+        with pytest.raises(ValueError):
+            bad()
+    assert len(runs.calls) == 7
+
+
+def test_flip_and_rotation_parameters_follow_the_recorded_prompts(fake_app, monkeypatch):
+    # T8: flip's Label also asks for the two values, rotation's for the label (live 2026-11-18, -03).
+    _, runs = _editor(fake_app, monkeypatch, open_=True)
+    flip = block_authoring.add_flip_parameter("Hinge side", [0, -12], [60, -12], [30, -16])
+    turn = block_authoring.add_rotation_parameter("Angle", [30, 42], 10, [30, 56], value_list=[0, 90, 180])
+    (_, flip_in, _), (_, turn_in, _) = runs.calls
+    assert flip_in == ["_F", "_L", "Hinge side", "Not flipped", "Flipped", [0, -12], [60, -12], [30, -16], "1"]
+    assert flip["pick_point"] == [15.0, -12.0]
+    assert turn_in == ["_R", "_L", "Angle", "_V", "_L", "0,90,180", [30, 42], 10.0, 0.0, [30, 56], "1"]
+    assert math.isclose(math.dist(turn["pick_point"], [30, 42]), 10, abs_tol=1e-5)
+    for bad in [lambda: block_authoring.add_flip_parameter("F", [0, 0], [0, 0], [1, 1]),
+                lambda: block_authoring.add_flip_parameter("F", [0, 0], [1, 0], [1, 1], grips=2),
+                lambda: block_authoring.add_rotation_parameter("A", [0, 0], 0, [1, 1]),
+                lambda: block_authoring.add_rotation_parameter("A", [0, 0], 1, [1, 1], grips=2)]:
+        with pytest.raises(ValueError):
+            bad()
+
+
+def test_add_action_answers_per_kind(fake_app, monkeypatch):
+    # T8: move and scale recorded live 2026-11-18 (-03); flip and rotate ask no action type.
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    doc.variables["BACTIONBARMODE"] = 1
+    box = {"crossing": [[24, 36], [36, 48]]}
+    block_authoring.add_action("move", [15, -6], box, offset=90, multiplier=0.5, location=[35, -20])
+    block_authoring.add_action("scale", [15, -6], box, location=[20, -20])
+    block_authoring.add_action("flip", [15, -12], {"handles": ["8A"]})
+    block_authoring.add_action("rotate", [37, 49], box, location=[45, 50])
+    assert [i for _, i, _ in runs.calls] == [
+        [[15, -6], "_M", "_S", box, "", "_M", 0.5, "_O", 90.0, [35, -20]],
+        [[15, -6], "_S", box, "", [20, -20]],
+        [[15, -12], {"handles": ["8A"]}, "", [15, -12]],
+        [[37, 49], box, "", [45, 50]],
+    ]
+    assert all(c == "BACTION" for c, _, _ in runs.calls) and doc.variables["BACTIONBARMODE"] == 1
+    for bad in [lambda: block_authoring.add_action("array", [0, 0], box),
+                lambda: block_authoring.add_action("scale", [0, 0], box, offset=90),
+                lambda: block_authoring.add_action("move", [0, 0], box, end="middle")]:
+        with pytest.raises(ValueError):
+            bad()

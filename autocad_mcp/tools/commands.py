@@ -58,6 +58,9 @@ from .control import CANCEL_INPUT
 RUN_DIR = Path(os.environ.get("AMCP_RUN_DIR") or Path.home() / ".autocad-mcp" / "run")
 START_WAIT = 3.0  # seconds for the expression to start (it first creates the transcript file)
 CANCEL_WAIT = 5.0  # seconds for a cancelled expression to finish its transcript, and for AutoCAD to answer
+# A second look after a command that left AutoCAD answering: once (SELECT in the Block Editor, live 2026-11-18,
+# AMCP-LIVE-20261118-02) AutoCAD answered right after the command ended and was waiting at a prompt a moment later.
+AFTER_WAIT = 0.75
 MAX_MESSAGE = 900  # characters per WM_COPYDATA message; AutoCAD drops a message of 1000 or more
 POLL = 0.05
 MAX_INPUTS = 60
@@ -347,6 +350,9 @@ def problem(result: dict) -> str | None:
     if result["cancelled"]:
         return ("The command still wanted input after the last answer and was cancelled. "
                 f"It was waiting at: {result['left_waiting_at']!r}.")
+    if result.get("cancelled_afterwards"):
+        return ("The command ended, but AutoCAD was waiting at a prompt again right afterwards; the server "
+                "cancelled that. Check the drawing before going on.")
     return None
 
 
@@ -483,8 +489,12 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
     result["drawing"] = str(doc.Name)
     result["messages"] = len(messages)
     result["undo_mark"] = undo
-    # Safety net: the expression should never leave a command waiting; if one is, cancel it.
-    if not autocad_answers(doc) and title_shows(window_title(hwnd), name):
+    # Safety net: the expression should never leave a command waiting; if one is, cancel it. Looked at twice.
+    waiting = not autocad_answers(doc)
+    if not waiting:
+        time.sleep(AFTER_WAIT)
+        waiting = not autocad_answers(doc)
+    if waiting and title_shows(window_title(hwnd), name):
         send_input(hwnd, CANCEL_INPUT)
         result["answers_after_cancel"] = autocad_answers(doc, CANCEL_WAIT)
         result["cancelled_afterwards"] = True
