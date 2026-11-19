@@ -174,3 +174,8 @@ This answers the first two open questions of 2026-11-06 and the "unresolved" of 
 - **verified:** the PDF's vector grid is set by the driver: `DWG To PDF.pc3` 600 per inch, `AutoCAD PDF (General Documentation).pc3` 1200, `AutoCAD PDF (High Quality Print).pc3` 2400. `PlotToFile(path)` without a device uses the layout's driver.
 - **verified:** a solid hatch reaches the PDF as triangle pairs, each filled and stroked with a zero-width line. The strokes hide seams between the triangles but are drawn one pixel wide and not anti-aliased, so small solid fills (a logo) have hard, stepped edges on screen at any driver resolution. Text in a TrueType font is written as real glyphs and stays sharp.
 - **inferred:** an MCP host can drop a tool argument called `device`. `set_page_setup` and `plot_pdf` take `plot_device`.
+
+## 2026-11-18: text justification over COM (T5; not live-verified)
+- **documented / inferred:** a TEXT or ATTDEF is justified by setting `Alignment` (AcAlignment) and then `TextAlignmentPoint`; `InsertionPoint` is then computed by AutoCAD. Fit and Aligned need two points and are left out of `justify`.
+- **unresolved:** whether setting an MTEXT's `AttachmentPoint` keeps `InsertionPoint` where it was (`add_mtext` sets it again afterwards to be sure).
+- **user-reported (B6):** with a sheet tab active, objects added to `ModelSpace` are not in the current space, so `-BLOCK` refuses them ("not in current space").

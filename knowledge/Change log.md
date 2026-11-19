@@ -297,3 +297,9 @@ Writer: Claude, in a Claude desktop session, on Alex's go ("Lets do it"). Branch
 - Tests: 1 new offline test (119 in total); `scripts\check.ps1` passes. Live: 28 of 28 with the repo code. **Not verified** through an installed bundle.
 - Updated: [[Sources/index]], [[Research/AutoCAD API gotchas]], Tool reference.
 - 2026-11-13: version 0.1.8 in `pyproject.toml` and `app.py`, on Alex's go ("Okay lets push it"), so a bundle with this change can be told apart from the installed 0.1.7. Still **not verified** through an installed bundle.
+
+## 2026-11-18: text justification and style; which space drawing tools use (T5, B6)
+Writer: Claude Code, on the user's go ("Continue to T5, B6"), step 3 of the improvement list. Branch `feat/text-and-space` (from `main`), one commit per item.
+- **T5:** `add_text` and `add_attribute_definition` take `justify` (13 justifications, or TL, MC, BR ...) and `style`; `add_mtext` takes `attachment` and `style`. With a justification, `position` is the justification point. Unknown styles are refused with the drawing's list.
+- **B6:** model space stays the default. Drawing, text, dimension and leader tools, `add_attribute_definition` and `insert_block` report `space`; with a sheet tab active (paper space current) the result notes that the object went into model space. New optional `layout=` on those tools draws on a sheet.
+- Tests: 6 new offline tests (125 in total); the five checks pass. **Not live-verified.**
