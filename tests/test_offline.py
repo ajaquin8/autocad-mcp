@@ -1398,30 +1398,20 @@ def test_centred_stretch_answers_m_value_location_and_selects_in_the_current_spa
     assert plain[5:] == [{"window": [[0, 0], [2, 2]]}, "", "_M", 0.5, [0, 0]]
 
 
-def test_stretch_action_refuses_handles_from_outside_the_block_editor(fake_app, monkeypatch):
-    # B2: handles read in model space name objects outside the edited block (the Block Editor gives the
-    # block's objects new handles); sent to BACTION they left it waiting. Now refused before it starts.
-    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+def test_stretch_action_explains_handles_from_outside_the_block_editor(fake_app, monkeypatch):
+    # B2, live 2026-11-18 (AMCP-LIVE-20261118-01): inside the Block Editor a model-space handle finds nothing,
+    # so BACTION stops at the selection and is put back. The error now says why.
+    found_nothing = {"completed": False, "missing_object": 6, "undone": True,
+                     "problem": "Answer 6 found nothing (no object with that handle, ...)."}
+    doc, runs = _editor(fake_app, monkeypatch, open_=True, results=[found_nothing, found_nothing])
     fake_app.ZoomExtents = lambda: None
-    doc.space.ObjectID, doc.paper.ObjectID = 11, 12
-    in_model = FakeEntity(doc, "AcDbLine", OwnerID=11)
-    on_sheet = FakeEntity(doc, "AcDbLine", OwnerID=12)
-    in_editor = FakeEntity(doc, "AcDbLine", OwnerID=99)
-    objects = {e.Handle: e for e in (in_model, on_sheet, in_editor)}
-
-    def handle_to_object(handle):
-        if handle not in objects:
-            raise _com_error(-2145386484)
-        return objects[handle]
-    doc.HandleToObject = handle_to_object
-    with pytest.raises(AcadError, match=rf"{in_model.Handle} \(Model\).*not in the block being edited.*new handles"):
-        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]], select={"handles": [in_model.Handle]})
-    with pytest.raises(AcadError, match=rf"{on_sheet.Handle} \(Sheet1\).*no object has handle FFFF"):
-        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]], select={"handles": [on_sheet.Handle, "FFFF"]})
-    assert runs.calls == []  # BACTION never started
-    block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]], select={"handles": [in_editor.Handle]})
+    with pytest.raises(AcadError, match=r"None of the handles 7C is an object of the block being edited.*new handles"
+                                        r".*crossing"):
+        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]], select={"handles": ["7C"]})
     (command, inputs, _), = runs.calls
-    assert command == "BACTION" and inputs[5] == {"handles": [in_editor.Handle]}
+    assert inputs[block_editor.SELECTION_ANSWER - 1] == {"handles": ["7C"]}
+    with pytest.raises(AcadError, match="Adding the stretch action failed: Answer 6 found nothing"):
+        block_editor.add_stretch_action([0, 0], [[0, 0], [1, 1]])  # a crossing that found nothing: plain message
 
 
 def test_stretch_action_widens_the_view_to_show_every_pick_point(fake_app, monkeypatch):
