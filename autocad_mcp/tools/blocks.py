@@ -14,8 +14,8 @@ import pywintypes
 from ..app import acad_tool
 from ..com import AcadError, enums, point, rad, rounded
 from ..session import session
-from .draw import TEXT_JUSTIFY, Point, finish_text, justification, place
-from .entities import attributes, by_handle, find_layout
+from .draw import TEXT_JUSTIFY, Point, drawing_space, finish_text, justification, place
+from .entities import attributes, by_handle
 
 # Not real block properties: "Origin" is the base point AutoCAD lists for every dynamic block.
 INTERNAL_PROPERTIES = {"origin"}
@@ -214,8 +214,7 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
             doc.Blocks.Item(block)
         except pywintypes.com_error:
             raise AcadError(f"No block named '{block}' in '{doc.Name}'. Use list_blocks.") from None
-    sheet = find_layout(doc, layout) if layout else None
-    space = sheet.Block if sheet is not None else doc.ModelSpace
+    space, where = drawing_space(doc, layout)
     with session.edit(doc) as change:
         ref = space.InsertBlock(point(position), block, float(scale), float(scale), float(scale), rad(rotation))
         change.add(ref)
@@ -226,7 +225,7 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
         if dynamic_properties:
             apply_properties(ref, dynamic_properties, change)
             doc.Regen(1)  # fields in attributes (labels) update on regen
-        info = place(change, ref, layer)
+        info = place(change, ref, layer, where)
         if bool(getattr(ref, "IsDynamicBlock", False)):
             # GetBoundingBox counts objects hidden by the visibility state (verified 2026-11-04).
             with exploded(ref, change) as parts:
@@ -236,8 +235,6 @@ def insert_block(block: str, position: Point, scale: float = 1, rotation: float 
         if dynamic_properties:
             info["dynamic_properties"] = {p["name"]: p["value"] for p in map(property_info, block_props(ref).values())
                                           if p["shown"]}
-        if sheet is not None:
-            info["layout"] = str(sheet.Name)
         return info
 
 
@@ -366,8 +363,8 @@ def measure_block(handle: str, include_geometry: bool = False, name: str = "") -
 def add_attribute_definition(tag: str, position: Point, height: float, prompt: str = "", default: str = "",
                              invisible: bool = False, constant: bool = False, preset: bool = False,
                              lock_position: bool = True, layer: str = "", justify: str = "left", style: str = "",
-                             name: str = "") -> dict:
-    """Add an attribute definition (ATTDEF) in model space: a fill-in field such as a sheet
+                             layout: str = "", name: str = "") -> dict:
+    """Add an attribute definition (ATTDEF), in model space by default: a fill-in field such as a sheet
     number or a part mark. Use it while drawing a block in its own drawing: save that drawing,
     insert it by path with insert_block, and the block has these attributes to fill in.
 
@@ -386,6 +383,7 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
         justify: left (default), center, right, middle, top_left ... bottom_right, or TL,
             MC, BR ... (as add_text), e.g. middle_center for a value centred in a tag.
         style: text style to use (default: the current one).
+        layout: a sheet's layout name to put it on its paper space (default: model space).
         name: which open drawing (default: active).
     """
     label = tag.strip().upper()  # over COM AutoCAD keeps the case as given (verified 2026-11-10)
@@ -398,11 +396,12 @@ def add_attribute_definition(tag: str, position: Point, height: float, prompt: s
     mode = sum(getattr(enums, flag) for flag, on in flags if on)
     justification(justify, TEXT_JUSTIFY, "justify")
     doc = session.document(name)
+    space, where = drawing_space(doc, layout)
     with session.edit(doc) as change:
-        att = change.add(doc.ModelSpace.AddAttribute(float(height), mode, prompt or label, point(position), label,
+        att = change.add(space.AddAttribute(float(height), mode, prompt or label, point(position), label,
                                                      default))
         extra = finish_text(doc, att, position, justify, style)
-        info = place(change, att, layer)
+        info = place(change, att, layer, where)
         info.update(extra, style=str(att.StyleName))
         info.update(tag=str(att.TagString), prompt=str(att.PromptString), default=str(att.TextString),
                     height=float(att.Height))

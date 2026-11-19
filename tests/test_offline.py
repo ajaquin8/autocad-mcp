@@ -1597,3 +1597,39 @@ def test_attribute_definition_can_be_centred_in_a_style(fake_app, text_enums):
     att = fake_app.doc.HandleToObject(info["handle"])
     assert att.Alignment == 10 and att.TextAlignmentPoint == (2.0, 3.0, 0.0)
     assert info["style"] == "NOTES-TEXT" and info["justify"] == "middle_center"
+
+
+# ---------- which space the drawing tools use (B6) ----------
+
+
+def test_draw_tools_say_which_space_and_warn_when_a_sheet_is_active(fake_app):
+    # B6: with a sheet tab active, draw_* still wrote to model space unnoticed, and the next -BLOCK said
+    # "not in current space". Model space stays the default; the result now says so.
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    doc.ActiveLayout = doc.Layouts.Item(0)  # Sheet1, paper space current
+    line = draw.draw_line([0, 0], [1, 0])
+    assert line["space"] == "model" and "Sheet1" in line["note"] and "layout='Sheet1'" in line["note"]
+    assert doc.HandleToObject(line["handle"]) in doc.space.items
+    doc.MSpace = True  # working inside a viewport: model space is the current space
+    assert "note" not in draw.draw_circle([0, 0], 1)
+    doc.MSpace, doc.ActiveLayout = False, doc.Layouts.Item(1)  # the Model tab
+    plain = draw.draw_line([0, 0], [2, 1])
+    assert plain["space"] == "model" and "note" not in plain
+
+
+def test_draw_tools_can_draw_on_a_sheet(fake_app, text_enums):
+    doc = fake_app.doc
+    session.mark_owned(doc)
+    circle = draw.draw_circle([5, 5], 1, layout="sheet1")
+    assert (circle["space"], circle["layout"]) == ("paper", "Sheet1") and "note" not in circle
+    assert doc.HandleToObject(circle["handle"]) in doc.paper.items
+    text = draw.add_text("A-101", [10, 1], 0.2, justify="BR", layout="Sheet1")
+    assert text["space"] == "paper" and doc.HandleToObject(text["handle"]) in doc.paper.items
+    att = blocks.add_attribute_definition("SHEET", [1, 1], 0.2, layout="Sheet1")
+    assert att["space"] == "paper" and doc.HandleToObject(att["handle"]) in doc.paper.items
+    centre = draw.draw_center_mark([0, 0], 1, layout="Sheet1")
+    assert centre["space"] == "paper" and len(doc.paper.items) == 5
+    assert draw.draw_line([0, 0], [1, 1], layout="Model")["space"] == "model"
+    with pytest.raises(AcadError, match="No layout named 'A-101'.*Sheet1, Model"):
+        draw.draw_line([0, 0], [1, 1], layout="A-101")

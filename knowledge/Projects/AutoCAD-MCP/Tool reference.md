@@ -31,20 +31,20 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 ## Draw
 
-- **`draw_line`**: Draw a line. Parameters: `start`, `end`, `layer`, `name`.
-- **`draw_polyline`**: Draw a 2D polyline (LWPOLYLINE) through points. Parameters: `points`, `closed`, `bulges`, `layer`, `name`.
-- **`draw_rectangle`**: Draw an axis-aligned rectangle as a closed polyline. Parameters: `corner`, `opposite_corner`, `layer`, `name`.
-- **`draw_circle`**: Draw a circle. Parameters: `center`, `radius`, `layer`, `name`.
-- **`draw_center_mark`**: Draw a centre mark: two crossing lines through the centre of a hole or arc, reaching a little past the curve. Both lines are one undo step. Use a centre-line layer. Parameters: `center`, `radius`, `extension`, `layer`, `name`.
-- **`draw_arc`**: Draw an arc counter-clockwise from start_angle to end_angle. Parameters: `center`, `radius`, `start_angle`, `end_angle`, `layer`, `name`.
-- **`add_text`**: Add single-line text (TEXT). position is where the justification point goes: the left end of the baseline by default, the centre of the text with justify="middle_center", so a centred label is one call. Parameters: `text`, `position`, `height`, `rotation`, `layer`, `justify`, `style`, `name`.
-- **`add_mtext`**: Add multiline text (MTEXT). position is its attachment point: the top-left corner by default, the centre with attachment="middle_center". Parameters: `text`, `position`, `width`, `height`, `layer`, `attachment`, `style`, `name`.
+- **`draw_line`**: Draw a line. Parameters: `start`, `end`, `layer`, `layout`, `name`.
+- **`draw_polyline`**: Draw a 2D polyline (LWPOLYLINE) through points. Parameters: `points`, `closed`, `bulges`, `layer`, `layout`, `name`.
+- **`draw_rectangle`**: Draw an axis-aligned rectangle as a closed polyline. Parameters: `corner`, `opposite_corner`, `layer`, `layout`, `name`.
+- **`draw_circle`**: Draw a circle. Parameters: `center`, `radius`, `layer`, `layout`, `name`.
+- **`draw_center_mark`**: Draw a centre mark: two crossing lines through the centre of a hole or arc, reaching a little past the curve. Both lines are one undo step. Use a centre-line layer. Parameters: `center`, `radius`, `extension`, `layer`, `layout`, `name`.
+- **`draw_arc`**: Draw an arc counter-clockwise from start_angle to end_angle. Parameters: `center`, `radius`, `start_angle`, `end_angle`, `layer`, `layout`, `name`.
+- **`add_text`**: Add single-line text (TEXT). position is where the justification point goes: the left end of the baseline by default, the centre of the text with justify="middle_center", so a centred label is one call. Parameters: `text`, `position`, `height`, `rotation`, `layer`, `justify`, `style`, `layout`, `name`.
+- **`add_mtext`**: Add multiline text (MTEXT). position is its attachment point: the top-left corner by default, the centre with attachment="middle_center". Parameters: `text`, `position`, `width`, `height`, `layer`, `attachment`, `style`, `layout`, `name`.
 
 ## Dimensions and leaders
 
-- **`add_dimension`**: Add a linear dimension between two points, using the current dimension style. Parameters: `first`, `second`, `text_position`, `kind`, `rotation`, `text_override`, `layer`, `name`.
-- **`add_radial_dimension`**: Dimension a circle or arc by its diameter (Ø) or radius (R), using the current dimension style. Parameters: `center`, `point_on_curve`, `kind`, `leader_length`, `text_override`, `layer`, `name`.
-- **`add_leader`**: Add a multileader (a callout): an arrow at the first point, a line through the next, and text at the last, using the current multileader style. Good for notes such as "1/4" DIA THRU, 4 PLACES". Parameters: `points`, `text`, `layer`, `name`.
+- **`add_dimension`**: Add a linear dimension between two points, using the current dimension style. Parameters: `first`, `second`, `text_position`, `kind`, `rotation`, `text_override`, `layer`, `layout`, `name`.
+- **`add_radial_dimension`**: Dimension a circle or arc by its diameter (Ø) or radius (R), using the current dimension style. Parameters: `center`, `point_on_curve`, `kind`, `leader_length`, `text_override`, `layer`, `layout`, `name`.
+- **`add_leader`**: Add a multileader (a callout): an arrow at the first point, a line through the next, and text at the last, using the current multileader style. Good for notes such as "1/4" DIA THRU, 4 PLACES". Parameters: `points`, `text`, `layer`, `layout`, `name`.
 
 ## Blocks
 
@@ -54,7 +54,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 - **`get_block_properties`** (read-only): Read a block reference's dynamic properties (value, allowed values) and attributes (value, invisible). Works on any open drawing. Parameters: `handle`, `include_hidden`, `name`.
 - **`set_block_properties`**: Set dynamic block properties by name, in the order given, as one undo step; if any value is refused, all are put back. Distances take numbers or inch fractions ("1 1/4"). Lists (e.g. Size) must use one of the allowed values (see get_block_properties). Parameters: `handle`, `properties`, `regen`, `allow_hidden`, `name`.
 - **`measure_block`**: Measure what a block reference actually shows (after its visibility state, stretches and arrays): extents and object counts, and optionally each visible line, polyline, arc and circle. Works by exploding a temporary copy, which is deleted again, so it only runs on drawings this server may edit. Attribute text is counted but not measured. Parameters: `handle`, `include_geometry`, `name`.
-- **`add_attribute_definition`**: Add an attribute definition (ATTDEF) in model space: a fill-in field such as a sheet number or a part mark. Use it while drawing a block in its own drawing: save that drawing, insert it by path with insert_block, and the block has these attributes to fill in. Parameters: `tag`, `position`, `height`, `prompt`, `default`, `invisible`, `constant`, `preset`, `lock_position`, `layer`, `justify`, `style`, `name`.
+- **`add_attribute_definition`**: Add an attribute definition (ATTDEF), in model space by default: a fill-in field such as a sheet number or a part mark. Use it while drawing a block in its own drawing: save that drawing, insert it by path with insert_block, and the block has these attributes to fill in. Parameters: `tag`, `position`, `height`, `prompt`, `default`, `invisible`, `constant`, `preset`, `lock_position`, `layer`, `justify`, `style`, `layout`, `name`.
 
 ## Edit
 

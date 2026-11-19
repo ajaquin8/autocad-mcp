@@ -35,6 +35,8 @@ add_dimension / insert_block -> capture_view to check the result visually ->
 save_document. Each drawing tool is one undo step and is rolled back
 automatically if it fails. Results report entity handles; use them with
 get_entity, move_entities, change_properties and delete_entities.
+Drawing, text and dimension tools put objects in model space unless layout= names a
+sheet; every result says which "space" was used.
 
 Templates and sheets: add_text_style, add_dimension_style and add_multileader_style make
 styles (give the dimension and multileader styles the plot scale factor); set_page_setup
