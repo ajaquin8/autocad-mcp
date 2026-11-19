@@ -10,8 +10,11 @@ expression:
 - feeds the answers one by one with (command x), names with spaces as LISP strings, points
   converted from WCS to the current UCS;
 - before each answer checks that the command is still active, and stops if it ended early;
-- logs LASTPROMPT after each answer (it lags one answer: a prompt is printed only when the next
-  input arrives);
+- logs LASTPROMPT, the command line's last line, after each answer. AutoCAD prints a prompt only
+  when the next input arrives, so the line read right after an answer is the prompt that answer
+  replied to (with the answer echoed after it), unless AutoCAD printed a message after taking the
+  answer ("1 found", "Specify selection set for action"); read_line tells these apart (E2,
+  transcripts of AMCP-LIVE-20261118-03);
 - cancels with (command) if the command is still waiting at the end, and goes back to an UNDO
   mark it set first if the command ended early or had to be cancelled;
 - writes that transcript to a file the server reads, so nothing needs COM while it runs.
@@ -85,8 +88,9 @@ DENIED_PREFIXES = ("VBA", "VLISP", "VLIDE", "CUI", "MENU", "SAVE", "CLOSE", "EXP
 # editor's boundary is not something to do blind).
 NO_UNDO = {"BEDIT", "BCLOSE", "BSAVE", "BSAVEAS"}
 
-LAG_NOTE = ("LASTPROMPT lags one answer: the prompt logged after an answer is usually the one that "
-            "answer replied to, or the one before; the prompt still open at the end is in 'left_waiting_at'.")
+FOUND = re.compile(r"^(.*?)\s+(\d+ found.*)$")
+TYPED_POINT = re.compile(r"^(.*:)\s+(-?[\d.]+(?:,-?[\d.]+){1,2})$")
+CANCEL_MARK = re.compile(r"\s*\*Cancel\*\s*$", re.IGNORECASE)
 
 
 def title_shows(title: str, drawing: str) -> bool:
@@ -253,7 +257,8 @@ def build_lisp(command: str, inputs: Sequence[Any], transcript: str, undo: bool)
     parts += [f"(command {lisp_string(command)})", "(amcp:log \"C\" (getvar \"LASTPROMPT\"))"]
     parts += [f"(amcp:in {i} {answer})" for i, answer in enumerate(answers, start=1)]
     parts += [
-        "(if (amcp:on) (progn (setq amcp:act T amcp:ok nil) (amcp:log \"A\" (getvar \"LASTPROMPT\")) (command)))",
+        "(if (amcp:on) (progn (setq amcp:act T amcp:ok nil) (amcp:log \"A\" (getvar \"LASTPROMPT\")) (command)"
+        " (amcp:log \"K\" (getvar \"LASTPROMPT\"))))",
         "(if amcp:early (amcp:log \"E\" (itoa amcp:early)))",
     ]
     if undo:
@@ -301,6 +306,60 @@ def describe_input(value: Any) -> str:
     return "Enter" if value == "" else (value if isinstance(value, str) else repr(value))
 
 
+def echo_of(value: Any) -> str | None:
+    """What AutoCAD prints after the prompt for this answer, when that is known: typed text and numbers
+    are echoed; points, objects, selections and Enter are not (a point given at a text prompt is,
+    as "x,y", which TYPED_POINT catches)."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return lisp_number(value)
+    return None
+
+
+def same_number(a: str, b: str) -> bool:
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return False
+
+
+def read_line(value: Any, line: str) -> dict:
+    """The command-line line read right after one answer, split into the prompt it replied to and
+    what AutoCAD printed after it (E2). See the module docstring for why that line is the answer's prompt.
+
+    {"prompt": p}: the answer's prompt, its echo removed.
+    {"prompt": p, "message": "1 found"}: AutoCAD added a message to the prompt's line.
+    {"prompt": p, "answered_as": "0,-12"}: a point was taken as typed text (a text prompt got a point).
+    {"prompt": None, "message": m}: text that AutoCAD should have echoed is missing, so the line is a
+    message printed after the answer and the answer's own prompt was not kept.
+    """
+    text = line.rstrip()
+    found = FOUND.match(text)
+    if found:
+        return {"prompt": found[1].rstrip(), "message": found[2]}
+    echo = echo_of(value)
+    if echo is not None:
+        head, sep, tail = text.rpartition(": ")
+        if sep and (tail.strip().lower() == echo.lower() or same_number(tail, echo)):
+            return {"prompt": head + ":"}
+        if text.lower().endswith(echo.lower()) and text[:-len(echo)].rstrip().endswith(":"):
+            return {"prompt": text[:-len(echo)].rstrip()}
+        return {"prompt": None, "message": text}
+    if isinstance(value, (list, tuple)):
+        typed = TYPED_POINT.match(text)
+        if typed:
+            return {"prompt": typed[1], "answered_as": typed[2]}
+    return {"prompt": text}
+
+
+def step_text(step: dict) -> str:
+    """One step for an error message: answer -> prompt (or message)."""
+    shown = step.get("prompt") or step.get("message") or ""
+    extra = f" [{step['message']}]" if step.get("prompt") and step.get("message") else ""
+    return f"{step['sent']} -> {shown!r}{extra}"
+
+
 def parse_transcript(text: str, command: str, inputs: Sequence[Any]) -> dict:
     """The transcript lines (tag, tab, text) as the result run_command returns."""
     steps: list[dict] = []
@@ -309,16 +368,24 @@ def parse_transcript(text: str, command: str, inputs: Sequence[Any]) -> dict:
                               "cancelled": False, "undone": False, "lisp_error": None, "missing_object": None}
     answered = 0
     finished = False
+    last_line, waiting, after_cancel = None, None, None
     for line in text.splitlines():
         tag, _, rest = line.partition("\t")
         if tag == "C":
-            steps.append({"sent": command, "lastprompt": rest})
+            step = {"sent": command}
+            if rest.strip() and not rest.lstrip().lower().startswith("command:"):
+                step["message"] = rest.strip()  # e.g. "Current visibility state: ..."
+            steps.append(step)
+            last_line = rest
         elif tag == "P":
             value = inputs[answered] if answered < len(inputs) else "?"
             answered += 1
-            steps.append({"sent": describe_input(value), "lastprompt": rest})
+            steps.append({"sent": describe_input(value), **read_line(value, rest)})
+            last_line = rest
         elif tag == "A":
-            result["left_waiting_at"], result["cancelled"] = rest, True
+            waiting, result["cancelled"] = rest, True
+        elif tag == "K":
+            after_cancel = CANCEL_MARK.sub("", rest).strip()
         elif tag == "E":
             result["ended_early_before_input"] = int(rest)
         elif tag == "U":
@@ -329,6 +396,13 @@ def parse_transcript(text: str, command: str, inputs: Sequence[Any]) -> dict:
             result["lisp_error"] = rest
         elif tag == "D":
             finished = True
+    # The prompt still open when the command was cancelled has usually not been printed yet (it is printed
+    # when the next input arrives), so the line before the cancel repeats the last answer's prompt. The line
+    # after the cancel may show it (not verified live); otherwise it is only known if AutoCAD printed it.
+    for seen in (after_cancel, waiting):
+        if seen and seen.strip() != (last_line or "").strip():
+            result["left_waiting_at"] = seen.strip()
+            break
     result["inputs_used"] = answered
     result["inputs_given"] = len(inputs)
     result["completed"] = (finished and answered == len(inputs) and not result["cancelled"]
@@ -348,8 +422,10 @@ def problem(result: dict) -> str | None:
         return (f"The command ended before answer {result['ended_early_before_input']} of "
                 f"{result['inputs_given']}; the rest were not sent. Check the prompts in 'steps'.")
     if result["cancelled"]:
-        return ("The command still wanted input after the last answer and was cancelled. "
-                f"It was waiting at: {result['left_waiting_at']!r}.")
+        waiting = (f"It was waiting at: {result['left_waiting_at']!r}." if result["left_waiting_at"] else
+                   "AutoCAD had not printed the prompt it was waiting at; the last answer replied to the last "
+                   "step's prompt.")
+        return f"The command still wanted input after the last answer and was cancelled. {waiting}"
     if result.get("cancelled_afterwards"):
         return ("The command ended, but AutoCAD was waiting at a prompt again right afterwards; the server "
                 "cancelled that. Check the drawing before going on.")
@@ -430,7 +506,7 @@ def cancel_unfinished(doc: Any, path: Path, sent: str, inputs: Sequence[Any], hw
     text += "."
     if partial and partial["steps"]:
         shown = partial["steps"][-8:]
-        steps = "; ".join(f"{s['sent']} -> {s['lastprompt']!r}" for s in shown)
+        steps = "; ".join(step_text(s) for s in shown)
         more = f" (last {len(shown)} of {len(partial['steps'])})" if len(partial["steps"]) > len(shown) else ""
         text += f" Prompts so far{more}: {steps}."
     if autocad_answers(doc, CANCEL_WAIT):
@@ -499,7 +575,6 @@ def run(doc: Any, command: str, inputs: Sequence[Any] = (), undo_on_failure: boo
         result["answers_after_cancel"] = autocad_answers(doc, CANCEL_WAIT)
         result["cancelled_afterwards"] = True
     result["problem"] = problem(result)
-    result["note"] = LAG_NOTE
     return result
 
 
@@ -526,9 +601,13 @@ def run_command(command: str, inputs: list[Any] | None = None, name: str = "",
     Text starting with "(", "!" or "'" is refused, and so are commands that run code,
     change AutoCAD's setup, write or close files, or switch drawings.
 
-    Read the result's "steps": LASTPROMPT lags one answer, and "left_waiting_at" is the
-    prompt that was still open. "completed" is true only when every answer was used and
-    the command ended with the last one.
+    Each of the result's "steps" pairs an answer with the prompt it replied to ("prompt",
+    the echoed answer removed) and anything AutoCAD printed after it ("message", e.g.
+    "1 found"). "prompt" is null when AutoCAD printed a message instead of echoing the
+    answer; "answered_as" means a point was taken as typed text (the prompt wanted text:
+    the answers are out of step). "left_waiting_at" is the prompt still open when the
+    command was cancelled, if AutoCAD had printed it. "completed" is true only when every
+    answer was used and the command ended with the last one.
 
     Args:
         command: command name, e.g. "BPARAMETER" or "-PURGE" (sent as "_.<name>").
