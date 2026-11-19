@@ -205,17 +205,20 @@ OUTSIDE_HANDLES = ("None of the handles {handles} is an object of the block bein
                    '{{"crossing": [p1, p2]}} or {{"window": [p1, p2]}} in block coordinates instead.')
 
 
-def location_inputs(multiplier: float | None, location: Point) -> list:
-    """The end of a stretch: "Specify action location or [Multiplier/Offset]" takes M and its value,
-    then the location."""
+def location_inputs(multiplier: float | None, offset: float | None, location: Point) -> list:
+    """The end of a move or stretch: "Specify action location or [Multiplier/Offset]" takes M and its
+    value, O and the angle ("Enter angle offset <0>", live 2026-11-18), then the location."""
     inputs: list = []
     if multiplier not in (None, 1):
         inputs += ["_M", float(multiplier)]
+    if offset:
+        inputs += ["_O", float(offset)]
     return inputs + [list(location)]
 
 
 def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | None, end: str,
-                   multiplier: float | None, exclude_types: str | None, location: Point | None) -> list:
+                   multiplier: float | None, exclude_types: str | None, location: Point | None,
+                   offset: float | None = None) -> list:
     if end not in PARAMETER_POINT:
         raise ValueError('end is "second" or "start".')
     if len(frame) != 2:
@@ -226,7 +229,7 @@ def stretch_inputs(parameter_pick: Point, frame: list[Point], select: dict | Non
     inputs += [selection_input(select, frame, exclude_types), ""]  # Enter ends the selection
     # M and its value, then the location: the order that worked through run_command in the 2026-11-16 to 18
     # sessions (user-reported) and in AMCP-LIVE-20261118-01.
-    return inputs + location_inputs(multiplier, location if location is not None else parameter_pick)
+    return inputs + location_inputs(multiplier, offset, location if location is not None else parameter_pick)
 
 
 def pick_points(inputs: list) -> list[tuple[float, float]]:
@@ -298,7 +301,7 @@ def run_action(doc: Any, what: str, inputs: list, select: dict | None) -> dict:
 @acad_tool()
 def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict | None = None,
                        end: str = "second", multiplier: float | None = None, exclude_types: str | None = None,
-                       location: Point | None = None, name: str = "") -> dict:
+                       location: Point | None = None, offset: float | None = None, name: str = "") -> dict:
     """Add a stretch action in the open Block Editor (BACTION Stretch) to the parameter
     drawn through parameter_pick (use pick_point from add_linear_parameter). Picks only
     find what is on screen, so the view is zoomed to extents first and widened if a pick
@@ -322,9 +325,11 @@ def add_stretch_action(parameter_pick: Point, frame: list[Point], select: dict |
         exclude_types: DXF types left out of the selection, e.g. "LWPOLYLINE,DIMENSION";
             "" for none (default: those two when multiplier is not 1, else none).
         location: where the action's badge goes (default: parameter_pick).
+        offset: angle offset in degrees, e.g. 90 to stretch at right angles to the
+            parameter (default 0).
         name: which drawing; it must be the active one (default: active).
     """
-    inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location)
+    inputs = stretch_inputs(parameter_pick, frame, select, end, multiplier, exclude_types, location, offset)
     return run_action(session.document(name), "Adding the stretch action", inputs, select)
 
 

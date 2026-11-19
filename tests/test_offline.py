@@ -1417,6 +1417,18 @@ def test_stretch_action_inputs_follow_the_live_prompts(fake_app, monkeypatch):
         block_editor.stretch_inputs([0, 0], [[0, 0]], None, "second", None, None, None)
 
 
+def test_stretch_angle_offset_goes_before_the_location(fake_app, monkeypatch):
+    # T9, prompts recorded live 2026-11-18 (AMCP-LIVE-20261118-03): O, then "Enter angle offset <0>", then location.
+    doc, runs = _editor(fake_app, monkeypatch, open_=True)
+    fake_app.ZoomExtents = lambda: None
+    block_editor.add_stretch_action([15, -6], [[55, -10], [70, 94]], offset=90, location=[65, -20])
+    (_, inputs, _), = runs.calls
+    assert inputs[-3:] == ["_O", 90.0, [65, -20]]
+    both = block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], None, "second", 0.5, "", [2, 2], 45)
+    assert both[-5:] == ["_M", 0.5, "_O", 45.0, [2, 2]]
+    assert "_O" not in block_editor.stretch_inputs([0, 0], [[0, 0], [1, 1]], None, "second", None, "", None, 0)
+
+
 def test_centred_stretch_answers_m_value_location_and_selects_in_the_current_space():
     # B1: the multiplier path removed polylines and dimensions with ssget "_X" (the whole drawing, not the
     # block being edited) and left BACTION waiting. Now they are left out of the one crossing selection.
