@@ -11,7 +11,7 @@ import time
 import pytest
 import pythoncom
 import pywintypes
-from conftest import FakeDoc, FakeDynProp, FakeEntity
+from conftest import FakeBlockRef, FakeDoc, FakeDynProp, FakeEntity
 from mcp.server.mcpserver.exceptions import ToolError
 
 from autocad_mcp import com
@@ -2307,6 +2307,103 @@ def test_list_block_editor_objects_reads_the_editor_space(fake_app, monkeypatch)
     doc.variables["BLOCKEDITOR"] = 0
     with pytest.raises(AcadError, match="not open"):
         block_authoring.list_block_editor_objects()
+
+
+class _StateBlock:
+    """A block with visibility states that -BVSTATE, BSAVE and BCLOSE act on like AutoCAD (T11):
+    New appends (copying what the current state shows with _C), Delete refuses the current state."""
+
+    def __init__(self, doc, monkeypatch, shows, extra=None, fail_on=None):
+        self.doc, self.saved, self.extra, self.fail_on, self.calls = doc, dict(shows), extra or {}, fail_on, []
+        self.editing, self.current = {}, None
+        session.mark_owned(doc)
+        doc.variables["BLOCKEDITOR"] = 0
+        doc.Blocks = _Blocks({"Door unit - 40": _Definition([])})
+        monkeypatch.setattr(block_editor.commands, "run", self.run)
+        monkeypatch.setattr(doc.space, "InsertBlock", self.insert)
+
+    def insert(self, insertion, block, xs, ys, zs, rotation):  # noqa: N802
+        ref = FakeBlockRef(self.doc, block, (0.0, 0.0, 0.0))
+        states = tuple(self.saved)
+        ref.props = [FakeDynProp("Style", states[0], states), FakeDynProp("Width", 48.0, (48.0, 60.0))]
+        ref.props += [FakeDynProp(n, v[0], v) for n, v in self.extra.items()]
+        return self.doc.space._add(ref)
+
+    def run(self, doc, command, inputs=(), undo_on_failure=True, timeout_seconds=30.0):
+        self.calls.append((command, list(inputs)))
+        ok = (command, list(inputs)) != self.fail_on
+        if command == "-BEDIT":
+            doc.variables["BLOCKEDITOR"], self.editing = 1, dict(self.saved)
+            self.current = next(iter(self.editing))
+        elif command == "BSAVE":
+            self.saved = dict(self.editing)
+        elif command == "BCLOSE":
+            doc.variables["BLOCKEDITOR"] = 0
+        elif command == "-BVSTATE" and ok:
+            option, state = inputs[0], inputs[1]
+            if option == "_S":
+                ok = state in self.editing
+                self.current = state if ok else self.current
+            elif option == "_N":
+                ok = state not in self.editing
+                if ok:
+                    self.editing[state], self.current = self.editing[self.current], state
+            elif option == "_D":
+                ok = state in self.editing and state != self.current
+                if ok:
+                    del self.editing[state]
+        return {"completed": ok, "steps": [{"sent": command, "prompt": "x"}], "inputs_used": len(inputs),
+                "cancelled": False, "undone": not ok, "problem": None if ok else "refused"}
+
+
+def test_order_visibility_states_rebuilds_them_in_the_new_order(fake_app, monkeypatch):
+    shows = {"VisibilityState0": {"frame"}, "24 in": {"frame", "leaf"}, "36 in": {"frame", "leaf", "glass"}}
+    fake = _StateBlock(fake_app.doc, monkeypatch, shows)
+    out = block_authoring.order_visibility_states("Door unit - 40", default="36 in")
+    assert out["states"] == ["36 in", "VisibilityState0", "24 in"] and out["default"] == "36 in" and out["changed"]
+    assert "problem" not in out and fake.saved == shows  # every state still shows what it showed
+    assert list(fake.saved) == out["states"] and fake_app.doc.variables["BLOCKEDITOR"] == 0
+    assert fake_app.doc.space.items == []  # both temporary copies are gone
+    out = block_authoring.order_visibility_states("Door unit - 40", ["24 in", "36 IN", "visibilitystate0"])
+    assert out["states"] == ["24 in", "36 in", "VisibilityState0"] and fake.saved == shows
+    calls = len(fake.calls)
+    assert not block_authoring.order_visibility_states("Door unit - 40", default="24 in")["changed"]
+    assert len(fake.calls) == calls  # already first: nothing run
+
+
+def test_order_visibility_states_leaves_the_block_alone_when_a_step_fails(fake_app, monkeypatch):
+    shows = {"A": {"a"}, "B": {"b"}}
+    fake = _StateBlock(fake_app.doc, monkeypatch, shows, fail_on=("-BVSTATE", ["_D", "A"]))
+    with pytest.raises(AcadError, match="stopped: .*closed without saving, so the block is unchanged"):
+        block_authoring.order_visibility_states("Door unit - 40", ["B", "A"])
+    assert fake.saved == shows and list(fake.saved) == ["A", "B"] and fake_app.doc.variables["BLOCKEDITOR"] == 0
+    assert ("BSAVE", []) not in fake.calls
+    for bad, match in [(dict(states=["B"]), "every visibility state once"),
+                       (dict(states=["A", "A"]), "every visibility state once"),
+                       (dict(default="C"), "No visibility state 'C'")]:
+        with pytest.raises(AcadError, match=match):
+            block_authoring.order_visibility_states("Door unit - 40", **bad)
+    with pytest.raises(ValueError, match="either states"):
+        block_authoring.order_visibility_states("Door unit - 40", ["B", "A"], default="B")
+
+
+def test_order_visibility_states_refuses_blocks_with_a_lookup(fake_app, monkeypatch):
+    fake = _StateBlock(fake_app.doc, monkeypatch, {"A": set(), "B": set()}, extra={"Size": ("S", "L")})
+    with pytest.raises(AcadError, match="more than one list property .*Style, Size"):
+        block_authoring.order_visibility_states("Door unit - 40", default="B")
+    assert fake.calls == []
+    fake.extra = {}
+    fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbBlockLookupParameterEntity"))  # seen in the editor
+    with pytest.raises(AcadError, match="has a lookup parameter"):
+        block_authoring.order_visibility_states("Door unit - 40", default="B")
+    assert [c[0] for c in fake.calls] == ["-BEDIT", "BCLOSE"] and list(fake.saved) == ["A", "B"]
+    fake_app.doc.variables["BLOCKEDITOR"] = 1
+    with pytest.raises(AcadError, match="is open"):
+        block_authoring.order_visibility_states("Door unit - 40", default="B")
+    session.owned.clear()
+    fake_app.doc.variables["BLOCKEDITOR"] = 0
+    with pytest.raises(AcadError, match="locked"):
+        block_authoring.order_visibility_states("Door unit - 40", default="B")
 
 
 def test_visibility_tools_follow_the_live_prompts(fake_app, monkeypatch):
