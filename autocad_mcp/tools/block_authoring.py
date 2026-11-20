@@ -1,5 +1,5 @@
-"""More Block Editor tools: list what is in the editor (T10), visibility parameters and states (T6),
-flip and rotation parameters, and move, scale, flip and rotate actions (T8).
+"""More Block Editor tools: list what is in the editor (T10), visibility parameters and states (T6)
+and their order (T11), flip and rotation parameters, and move, scale, flip and rotate actions (T8).
 
 Built on run_command like tools/block_editor.py. The prompt orders were recorded live on 2026-11-18
 (AMCP-LIVE-20261118-03, AutoCAD 2027, BACTIONBARMODE 0), except where a comment says "not seen yet".
@@ -13,11 +13,13 @@ from typing import Any
 import pywintypes
 
 from ..app import acad_tool
-from ..com import rounded, xyz
+from ..com import AcadError, point, rounded, xyz
 from ..session import session
+from . import block_editor
 from .block_editor import (
     PARAMETER_POINT,
     location_inputs,
+    require_block,
     require_editor,
     run_action,
     run_checked,
@@ -94,6 +96,8 @@ def add_visibility_parameter(location: Point, label: str = "Visibility", grips: 
     """Add a visibility parameter in the open Block Editor (BPARAMETER Visibility): the drop-down
     users pick a visibility state from. AutoCAD starts it with one state, "VisibilityState0".
     Add states with visibility_state, and choose what each shows with set_object_visibility.
+    The first state is the default; new ones go after it, so delete VisibilityState0 or use
+    order_visibility_states (after saving) to choose another default.
     Objects AND parameters added while a state is current exist only in that state.
 
     Args:
@@ -114,7 +118,8 @@ def add_visibility_parameter(location: Point, label: str = "Visibility", grips: 
 @acad_tool()
 def visibility_state(action: str, state: str, new_state_shows: str = "current", name: str = "") -> dict:
     """Make, switch to or delete a visibility state in the open Block Editor (-BVSTATE). Needs a
-    visibility parameter first (add_visibility_parameter). A new state becomes the current one.
+    visibility parameter first (add_visibility_parameter). A new state becomes the current one and
+    goes to the end of the list (the first state is the default; see order_visibility_states).
 
     Args:
         action: "new", "set" (make it current) or "delete".
@@ -158,6 +163,131 @@ def set_object_visibility(select: dict, visible: bool, all_states: bool = False,
     result = run_checked(doc, f"{'Showing' if visible else 'Hiding'} objects", command,
                          [answer, "", "_A" if all_states else "_C"])
     return {"visible": visible, "all_states": all_states, "steps": result["steps"]}
+
+
+def visibility_list(doc: Any, block: str) -> tuple[str, list[str]]:
+    """(label, states in order) read from a temporary reference of the saved block: a placed block
+    lists its visibility states in the definition's order, the first being the default (AutoCAD
+    help, "To Change the Order of the Visibility States List"). Only a block with exactly one list
+    property is accepted: a second one is almost always a lookup, whose table rows name states."""
+    with session.edit(doc) as change:
+        ref = change.add(doc.ModelSpace.InsertBlock(point([0, 0]), block, 1.0, 1.0, 1.0, 0.0))
+        try:
+            lists = []
+            if bool(getattr(ref, "IsDynamicBlock", False)):
+                for prop in ref.GetDynamicBlockProperties():
+                    allowed = list(prop.AllowedValues or ())
+                    if allowed and all(isinstance(a, str) for a in allowed) and isinstance(prop.Value, str):
+                        lists.append((str(prop.PropertyName), [str(a) for a in allowed]))
+        finally:
+            ref.Delete()
+            change.created[:] = [o for o in change.created if o is not ref]
+    if not lists:
+        raise AcadError(f"'{block}' has no visibility states (no list property on a placed copy). Save the "
+                        "block (close_block_editor) after adding them.")
+    if len(lists) > 1:
+        raise AcadError(f"'{block}' has more than one list property ({', '.join(n for n, _ in lists)}); one is "
+                        "probably a lookup, whose table rows name visibility states. Rebuilding the states would "
+                        "lose those rows, so reorder them in AutoCAD's Visibility States dialog (Move Up/Down).")
+    return lists[0]
+
+
+def new_order(current: list[str], states: list[str] | None, default: str) -> list[str]:
+    """The wanted order: `states` (every state, each once, any case) or `default` moved to the top."""
+    by_key = {s.lower(): s for s in current}
+    if bool(states) == bool(default.strip()):
+        raise ValueError("Give either states (all of them, in the new order) or default, not both.")
+    if default.strip():
+        first = by_key.get(default.strip().lower())
+        if first is None:
+            raise AcadError(f"No visibility state '{default}'; the block has: {', '.join(current)}.")
+        return [first] + [s for s in current if s != first]
+    keys = [str(s).strip().lower() for s in states or []]
+    if sorted(keys) != sorted(by_key) or len(set(keys)) != len(keys):
+        raise AcadError(f"List every visibility state once, in the new order. The block has: {', '.join(current)}; "
+                        f"given: {', '.join(map(str, states or []))}.")
+    return [by_key[k] for k in keys]
+
+
+def temporary_names(current: list[str]) -> list[str]:
+    taken = {s.lower() for s in current}
+    names, i = [], 1
+    while len(names) < len(current):
+        name = f"~amcp {i}"
+        if name not in taken:
+            names.append(name)
+        i += 1
+    return names
+
+
+@acad_tool(timeout=600)
+def order_visibility_states(block: str, states: list[str] | None = None, default: str = "",
+                            name: str = "") -> dict:
+    """Reorder a dynamic block's visibility states, or choose its default (the first state: what
+    a newly inserted block shows). Give either states (every state, in the new order) or
+    default (moved to the top, the rest keep their order). Run it with the Block Editor closed,
+    after saving the block. AutoCAD can only reorder states in a dialog, so the states are
+    rebuilt in the Block Editor: each is copied under a temporary name, the originals are
+    deleted and made again, in the new order, from the copies (-BVSTATE New "Current
+    visibility"), then the block is saved and the new order read back from a placed copy.
+    If any step fails, the Block Editor is closed without saving and the block is unchanged.
+    Blocks with a lookup parameter are refused (lookup rows name states and would be lost).
+
+    Args:
+        block: the block definition's name.
+        states: every visibility state, in the new order, e.g. ["36 in", "30 in", "24 in"].
+        default: or just the state to put first, e.g. "36 in".
+        name: which drawing; it must be the active one (default: active).
+    """
+    doc = session.document(name)
+    require_editor(doc, False)
+    require_block(doc, block)
+    session.require_editable(doc)
+    label, current = visibility_list(doc, block)
+    wanted = new_order(current, states, default)
+    if wanted == current:
+        return {"block": block, "label": label, "states": current, "default": current[0], "changed": False}
+    temps = temporary_names(current)
+    block_editor.open_block_editor(block, name=name)
+    count = 0
+
+    def bvstate(*inputs: str) -> None:
+        nonlocal count
+        run_checked(doc, f"-BVSTATE {' '.join(inputs)}", "-BVSTATE", list(inputs))
+        count += 1
+
+    try:
+        lookups = [str(doc.ModelSpace.Item(i).ObjectName) for i in range(doc.ModelSpace.Count)]
+        if any("Lookup" in n for n in lookups):
+            raise AcadError(f"'{block}' has a lookup parameter, whose table rows name visibility states; "
+                            "rebuilding the states would lose them. Reorder them in AutoCAD's Visibility States "
+                            "dialog (Move Up/Down).")
+        for state, temp in zip(wanted, temps, strict=True):  # copies, in the new order
+            bvstate("_S", state)
+            bvstate("_N", temp, "_C")
+        for state in current:  # the current state is a copy now, so every original can go
+            bvstate("_D", state)
+        for state, temp in zip(wanted, temps, strict=True):  # the originals again, in the new order
+            bvstate("_S", temp)
+            bvstate("_N", state, "_C")
+        for temp in temps:
+            bvstate("_D", temp)
+        bvstate("_S", wanted[0])
+    except Exception as err:
+        try:
+            block_editor.close_block_editor(save=False, name=name)
+            back = " The Block Editor was closed without saving, so the block is unchanged."
+        except Exception as close_err:  # noqa: BLE001 - reported with the first error
+            back = f" Closing the Block Editor without saving also failed ({close_err}); close it before going on."
+        raise AcadError(f"Reordering the visibility states of '{block}' stopped: {err}{back}") from None
+    block_editor.close_block_editor(save=True, name=name)
+    _, after = visibility_list(doc, block)
+    result = {"block": block, "label": label, "before": current, "states": after, "default": after[0],
+              "changed": True, "commands_run": count}
+    if after != wanted:
+        result["problem"] = (f"The block was saved, but a placed copy lists {', '.join(after)} instead of "
+                             f"{', '.join(wanted)}.")
+    return result
 
 
 # ---------- flip and rotation parameters, actions (T8) ----------
