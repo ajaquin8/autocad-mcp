@@ -527,6 +527,48 @@ def test_viewport_frames_the_model_area_at_the_exact_scale(fake_app):
     assert info["layout"] == "Sheet1" and fake_app.doc.undo_log == ["start", "end"]
 
 
+def _picky_mspace(fake_app, refuse_always: bool = False) -> list:
+    """Make the fake drawing refuse MSpace = True like AutoCAD on a fresh sheet (GAP-014): until the
+    paper view has been zoomed (or always). Returns the list of refusals."""
+    refusals: list = []
+
+    class PickyDoc(FakeDoc):
+        @property
+        def MSpace(self):  # noqa: N802
+            return self.__dict__.get("_mspace", False)
+
+        @MSpace.setter
+        def MSpace(self, on):  # noqa: N802
+            if on and (refuse_always or not getattr(fake_app, "zoomed", None)):
+                refusals.append(on)
+                raise _com_error(-2147352567)
+            self.__dict__["_mspace"] = on
+
+    fake_app.doc.__class__ = PickyDoc
+    return refusals
+
+
+def test_viewport_zooms_the_sheet_and_retries_when_autocad_has_no_active_modelspace_viewport(fake_app):
+    session.mark_owned(fake_app.doc)
+    refusals = _picky_mspace(fake_app)
+    info = sheets.add_viewport("Sheet1", [1, 1], [9, 7], view_center=[50, 20], scale=0.5)
+    vp = fake_app.doc.HandleToObject(info["handle"])
+    assert len(refusals) == 1 and "regen" in fake_app.doc.undo_log
+    assert fake_app.zoomed == ((42, 14, 0), (58, 26, 0), True)  # the model zoom still ran, inside the viewport
+    assert (vp.StandardScale, vp.CustomScale, vp.DisplayLocked) == (1, 0.5, True)
+    assert fake_app.doc.MSpace is False and fake_app.doc.ActivePViewport is vp
+
+
+def test_viewport_says_what_to_check_and_rolls_back_when_autocad_keeps_refusing(fake_app):
+    session.mark_owned(fake_app.doc)
+    fake_app.doc.ActiveLayout = fake_app.doc.Layouts.Item(1)  # the user was on Model
+    refusals = _picky_mspace(fake_app, refuse_always=True)
+    with pytest.raises(AcadError, match="would not switch into the new viewport.*Nothing was added"):
+        sheets.add_viewport("Sheet1", [1, 1], [9, 7], view_center=[50, 20], scale=0.5)
+    assert len(refusals) == 2 and fake_app.doc.MSpace is False
+    assert fake_app.doc.paper.items == [] and fake_app.doc.ActiveLayout.Name == "Model"
+
+
 def test_viewport_refuses_model_locked_drawings_and_rolls_back(fake_app):
     with pytest.raises(AcadError, match="is locked"):
         sheets.add_viewport("Sheet1", [0, 0], [1, 1], [0, 0], 1)
