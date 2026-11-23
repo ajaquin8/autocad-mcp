@@ -336,6 +336,37 @@ def test_move_entities_moves_by_the_offset(fake_app):
     assert moved == ((0, 0, 0), (5, 0, 0))
 
 
+def test_set_text_replaces_the_words_and_keeps_the_handle_and_properties(fake_app):
+    session.mark_owned(fake_app.doc)
+    note = draw.add_mtext("NEW MARK. SILL AT LANTERN ROOF", [0, 0], width=40, height=2.5, layer="0")
+    ent = fake_app.doc.HandleToObject(note["handle"])
+    ent.Layer, ent.StyleName = "A-ANNO-NOTE", "NOTES-TEXT"
+    fake_app.doc.undo_log.clear()
+    out = edit.set_text(note["handle"].lower(), "SILL AT LANTERN ROOF")
+    assert out["handle"] == note["handle"] and out["old_text"] == "NEW MARK. SILL AT LANTERN ROOF"
+    assert out["text"] == ent.TextString == "SILL AT LANTERN ROOF"
+    assert (ent.Layer, ent.StyleName, ent.InsertionPoint) == ("A-ANNO-NOTE", "NOTES-TEXT", (0, 0, 0))
+    assert fake_app.doc.undo_log == ["start", "end"]  # one undo step, no regen without a field
+    stamp = draw.add_text("C:\\Jobs\\Sheet.dwg", [0, -5], height=1)
+    edit.set_text(stamp["handle"], '%<\\AcVar Filename \\f "%fn6">%')
+    assert "regen" in fake_app.doc.undo_log
+
+
+def test_set_text_refuses_other_objects_empty_text_and_locked_drawings(fake_app):
+    line_handle = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbLine")).Handle
+    text = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbText", TextString="OLD")).Handle
+    with pytest.raises(AcadError, match="is locked"):
+        edit.set_text(text, "NEW")
+    session.mark_owned(fake_app.doc)
+    with pytest.raises(AcadError, match="is AcDbLine, not text; set_text changes TEXT, MTEXT"):
+        edit.set_text(line_handle, "NEW")
+    with pytest.raises(AcadError, match="delete_entities"):
+        edit.set_text(text, "")
+    with pytest.raises(AcadError, match="No object with handle"):
+        edit.set_text("FFFF", "NEW")
+    assert fake_app.doc.HandleToObject(text).TextString == "OLD"
+
+
 def test_unknown_handle_is_reported(fake_app):
     session.mark_owned(fake_app.doc)
     with pytest.raises(AcadError, match="No object with handle"):
