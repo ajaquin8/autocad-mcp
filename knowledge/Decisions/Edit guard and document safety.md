@@ -72,3 +72,13 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership acro
 
 ## Supersedes / superseded by
 None.
+
+## 2026-11-24: one AutoCAD client at a time across server processes (GAP-017, slice a)
+Status: **built; not live-verified** (gd-coder, Hermes morning MCP-fix lane, from the NightDraft gap log backlog).
+- **Why (user-reported 2026-11-23):** up to four autocad-mcp processes (Hermes profiles and the Claude desktop extension) talked to one AutoCAD with no lock between them. Inside one server every call is already serialized on the STA worker; across processes nothing was. Parallel COM clients are the suspected cause of AutoCAD's layout tabs crashing (**inferred**, not reproduced).
+- **Lock:** the COM worker holds a named Win32 mutex (`Local\autocad-mcp-com`, one per Windows login) for the whole of each tool call. A call waits up to 30 s (`AUTOCAD_MCP_LOCK_WAIT_SECONDS`) and then fails with "AutoCAD is in use by another autocad-mcp server (process N, running <tool> since <time>)", before anything is sent to AutoCAD. The last holder is written to `%LOCALAPPDATA%\autocad-mcp\com-lock.json`. `AUTOCAD_MCP_CROSS_PROCESS_LOCK=0` switches it off.
+  - If a server dies holding the lock, Windows hands it to the next waiter (WAIT_ABANDONED), which carries on.
+  - If Windows refuses to create the mutex, calls run unlocked, as before.
+  - `cancel_command` does not use the COM worker, so it is never held up by the lock.
+- **Ownership record:** each entry in `owned.json` now names the server process that wrote it (`server`: pid@start time). A server keeps the entries of other servers that are still running against the same AutoCAD instead of overwriting them, and the file is written through a temporary file and a rename. All writes happen on the worker, inside the lock. Old entries without `server` are dropped on the next write, as every write did before.
+- **Not in this slice:** cancelling queued calls when the client gives up, per-call deadlines (slice b), and acad_status checks for crash dialogs and competing processes (slice c). A timed-out call still runs later inside AutoCAD, and holds the lock while it does.

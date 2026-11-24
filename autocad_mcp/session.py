@@ -25,7 +25,7 @@ import win32com.client
 import win32com.client.dynamic
 
 from . import winui
-from .com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, enums
+from .com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, enums, write_json_atomic
 
 T = TypeVar("T")
 
@@ -41,6 +41,21 @@ SETTLE_TIMEOUT = 45.0
 # counts only while it stays open in the same AutoCAD: the record names the AutoCAD process (id and
 # start time) and each drawing's key and document window, which is new whenever a drawing is opened.
 OWNED_RECORD = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "owned.json"
+_SERVER: list[str] = []
+
+
+def this_server() -> str:
+    """'<pid>@<start time>' of this server process; tags its entries in the ownership record so
+    several servers sharing one AutoCAD keep each other's entries (GAP-017)."""
+    if not _SERVER:
+        _SERVER.append(winui.pid_identity(os.getpid()) or f"{os.getpid()}@?")
+    return _SERVER[0]
+
+
+def server_running(server: str) -> bool:
+    """True while the server process named in a record entry is still running (same pid and start time)."""
+    pid, _, _ = server.partition("@")
+    return pid.isdigit() and winui.pid_identity(int(pid)) == server
 
 
 def acad_identity(app: Any) -> str | None:
@@ -427,12 +442,26 @@ class Session:
         return restored
 
     def _save_owned(self) -> None:
+        """Write this server's drawings to the record and keep the entries of other servers that
+        are still running against the same AutoCAD (each server used to overwrite the others').
+        Every caller runs on the COM worker, which holds the cross-process lock, so two servers
+        never read-modify-write the record at the same time (GAP-017)."""
         if not self.identity:
             return
-        drawings = [{"key": k, "window": w} for k, w in self.owned_windows.items() if k in self.owned]
+        me = this_server()
+        others = []
+        try:
+            record = json.loads(OWNED_RECORD.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        if isinstance(record, dict) and record.get("autocad") == self.identity:
+            for d in record.get("drawings", []):
+                server = d.get("server") if isinstance(d, dict) else None
+                if isinstance(server, str) and server != me and server_running(server):
+                    others.append(d)
+        mine = [{"key": k, "window": w, "server": me} for k, w in self.owned_windows.items() if k in self.owned]
         with contextlib.suppress(OSError):
-            OWNED_RECORD.parent.mkdir(parents=True, exist_ok=True)
-            OWNED_RECORD.write_text(json.dumps({"autocad": self.identity, "drawings": drawings}), encoding="utf-8")
+            write_json_atomic(OWNED_RECORD, {"autocad": self.identity, "drawings": others + mine})
 
     @contextlib.contextmanager
     def edit(self, doc: Any = None) -> Iterator[Edit]:
