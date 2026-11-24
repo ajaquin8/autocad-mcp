@@ -44,6 +44,11 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
 - **Busy guard:** edits are refused while you are in a command, prompt or dialog (`CMDACTIVE`).
   When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
   retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
+- **One client at a time:** several autocad-mcp servers (for example a Claude desktop extension and
+  a Hermes profile) take turns on AutoCAD through a shared Windows lock, one tool call at a time. A
+  call waits up to 30 seconds for the other server (`AUTOCAD_MCP_LOCK_WAIT_SECONDS`) and then fails
+  without touching AutoCAD, naming the process that holds it. `AUTOCAD_MCP_CROSS_PROCESS_LOCK=0`
+  switches the lock off. Servers built before this change (including a 0.1.9 bundle) ignore the lock.
 - **`cancel_command`** cancels (two Ctrl+C) a prompt the server left open, and refuses unless the
   active drawing is one the server created. Busy errors name the AutoCAD dialog that is in the way.
 - **`run_command`** runs one prompt-driven command (Block Editor commands, `-PURGE` ...) with a list of
