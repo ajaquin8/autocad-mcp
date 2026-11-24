@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pywintypes
+
 from ..app import acad_tool
-from ..com import AcadError, enums, point, xyz
+from ..com import AcadError, describe_com_error, enums, point, xyz
 from ..session import session
 from .draw import Point, place
 from .entities import find_layout
@@ -73,8 +75,7 @@ def add_viewport(layout: str, corner: Point, opposite_corner: Point, view_center
         change.add(viewport)
         viewport.Display(True)
         try:
-            doc.MSpace = True
-            doc.ActivePViewport = viewport
+            _enter_viewport(doc, viewport, (x1, y1), (x2, y2))
             # Frame exactly the model area the viewport shows at this scale, then pin the scale.
             session.app.ZoomWindow(point([cx - half_w, cy - half_h]), point([cx + half_w, cy + half_h]))
             viewport.StandardScale = enums.acVpCustomScale
@@ -86,6 +87,30 @@ def add_viewport(layout: str, corner: Point, opposite_corner: Point, view_center
         info = place(change, viewport, layer)
         info.update(layout=str(sheet.Name), view_center=[cx, cy])
         return info
+
+
+def _enter_viewport(doc, viewport, corner: tuple, opposite_corner: tuple) -> None:
+    """Switch into model space through `viewport`. AutoCAD refuses with "There is no active modelspace
+    viewport" (0x8021005E) when no viewport is on and on screen, as on a fresh sheet whose paper view
+    may not show the new viewport yet (GAP-014). Then zoom the paper view onto the viewport, regen
+    and try once more; if AutoCAD still refuses, say what to check (the edit is rolled back)."""
+    try:
+        doc.MSpace = True
+    except pywintypes.com_error:
+        (x1, y1), (x2, y2) = corner, opposite_corner
+        pad_x, pad_y = abs(x2 - x1) * 0.05, abs(y2 - y1) * 0.05
+        session.app.ZoomWindow(point([min(x1, x2) - pad_x, min(y1, y2) - pad_y]),
+                               point([max(x1, x2) + pad_x, max(y1, y2) + pad_y]))  # paper view, in paper space
+        doc.Regen(1)  # acAllViewports
+        viewport.Display(True)
+        try:
+            doc.MSpace = True
+        except pywintypes.com_error as err:
+            raise AcadError(
+                "AutoCAD would not switch into the new viewport, even after zooming the sheet onto it "
+                f"({describe_com_error(err)}). Nothing was added. Check that the AutoCAD window is not "
+                "minimised and the sheet tab is showing, then try again.") from None
+    doc.ActivePViewport = viewport
 
 
 def _strings(values) -> list[str]:
