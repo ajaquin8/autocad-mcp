@@ -44,6 +44,10 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
 - **Busy guard:** edits are refused while you are in a command, prompt or dialog (`CMDACTIVE`).
   When AutoCAD asks to be called again later (opening a drawing, loading an add-in), the server
   retries for up to 8 seconds (`AUTOCAD_MCP_BUSY_RETRY_SECONDS`, 0 switches it off).
+- **Health in `acad_status`:** a `health` block says whether Windows reports AutoCAD as not
+  responding, whether a crash report or fatal-error window is open (any process, including the
+  Autodesk crash reporter), whether the active drawing's layouts answer, and which other
+  autocad-mcp servers are running. Busy, timed-out and lost-connection errors also name a crash window.
 - **`cancel_command`** cancels (two Ctrl+C) a prompt the server left open, and refuses unless the
   active drawing is one the server created. Busy errors name the AutoCAD dialog that is in the way.
 - **`run_command`** runs one prompt-driven command (Block Editor commands, `-PURGE` ...) with a list of
