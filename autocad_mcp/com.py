@@ -14,6 +14,7 @@ import math
 import os
 import queue
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future
@@ -224,18 +225,138 @@ class MessageFilter:
         ctypes.windll.ole32.CoRegisterMessageFilter(None, ctypes.byref(ctypes.c_void_p()))
 
 
+# ---------- one AutoCAD client at a time, across processes ----------
+
+# Inside one server every COM call already runs on one thread. Several server processes (two AI
+# clients, or a Claude desktop extension next to a Hermes profile) still reached the same AutoCAD at
+# the same time, and parallel COM clients are the suspected cause of AutoCAD's layout tabs crashing
+# (GAP-017, user-reported 2026-11-23). A named Win32 mutex makes the servers on this Windows login
+# take turns: each tool call holds it from start to end.
+LOCK_NAME = "Local\\autocad-mcp-com"
+LOCK_HOLDER = Path(os.environ.get("LOCALAPPDATA", ".")) / "autocad-mcp" / "com-lock.json"
+_WAIT_OBJECT_0, _WAIT_ABANDONED, _WAIT_TIMEOUT = 0x0, 0x80, 0x102
+_LOCK_POLL_MS = 100
+
+
+def lock_wait_seconds() -> float:
+    """How long a call waits for another server to finish (AUTOCAD_MCP_LOCK_WAIT_SECONDS, default 30)."""
+    try:
+        return max(0.0, float(os.environ.get("AUTOCAD_MCP_LOCK_WAIT_SECONDS", "30")))
+    except ValueError:
+        return 30.0
+
+
+def lock_enabled() -> bool:
+    """AUTOCAD_MCP_CROSS_PROCESS_LOCK=0 switches the lock off (escape hatch; default on)."""
+    return os.environ.get("AUTOCAD_MCP_CROSS_PROCESS_LOCK", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def write_json_atomic(path: Path, data: Any) -> None:
+    """Write JSON through a temporary file and a rename, so a reader in another process never sees
+    half a file. Raises OSError if the rename keeps failing (a reader holding the file open)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+                raise
+            time.sleep(0.02)
+
+
+class CrossProcessLock:
+    """A named Win32 mutex shared by every autocad-mcp server on this Windows login.
+
+    A Win32 mutex belongs to the thread that took it, so take and release it on the same thread
+    (the STA worker). It is recursive. If the holder died while holding it, Windows hands it to the
+    next waiter (WAIT_ABANDONED); that counts as taken, and `abandoned` says so.
+    """
+
+    def __init__(self, name: str | None = None, holder_file: Path | None = None) -> None:
+        self.name = name
+        self.holder_file = holder_file
+        self._handle: int | None = None
+        self.abandoned = 0  # times the lock was taken over from a server that died holding it
+
+    def _resolved_name(self) -> str:
+        return self.name or os.environ.get("AUTOCAD_MCP_LOCK_NAME") or LOCK_NAME
+
+    def _mutex(self) -> int:
+        if self._handle is None:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateMutexW.restype = wintypes.HANDLE
+            kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+            handle = kernel32.CreateMutexW(None, False, self._resolved_name())
+            if not handle:
+                raise OSError(f"CreateMutexW failed (error {ctypes.get_last_error()})")
+            self._handle = handle
+            return handle
+        return self._handle
+
+    def holder(self) -> dict:
+        """The last recorded holder ({pid, tool, since}), or {} if unknown."""
+        try:
+            data = json.loads((self.holder_file or LOCK_HOLDER).read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def acquire(self, tool: str, wait_seconds: float) -> None:
+        """Take the lock, waiting up to `wait_seconds` for another server; AcadError if it never frees."""
+        handle = self._mutex()
+        kernel32 = ctypes.windll.kernel32
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            result = kernel32.WaitForSingleObject(wintypes.HANDLE(handle), _LOCK_POLL_MS)
+            if result in (_WAIT_OBJECT_0, _WAIT_ABANDONED):
+                if result == _WAIT_ABANDONED:
+                    self.abandoned += 1
+                with contextlib.suppress(OSError):
+                    write_json_atomic(self.holder_file or LOCK_HOLDER, {
+                        "pid": os.getpid(), "tool": tool, "since": time.strftime("%Y-%m-%dT%H:%M:%S")})
+                return
+            if result != _WAIT_TIMEOUT:
+                raise OSError(f"WaitForSingleObject failed (0x{result & 0xFFFFFFFF:08X})")
+            if time.monotonic() >= deadline:
+                raise AcadError(self.busy_message(wait_seconds))
+            with contextlib.suppress(Exception):
+                pythoncom.PumpWaitingMessages()  # an STA thread should keep its messages moving
+
+    def release(self) -> None:
+        if self._handle is not None:
+            ctypes.windll.kernel32.ReleaseMutex(wintypes.HANDLE(self._handle))
+
+    def busy_message(self, waited: float) -> str:
+        h = self.holder()
+        who = "another autocad-mcp server"
+        if h.get("pid") and h.get("pid") != os.getpid():
+            who += f" (process {h['pid']}, running {h.get('tool', '?')} since {h.get('since', '?')})"
+        return (f"AutoCAD is in use by {who}; waited {waited:g}s for it to finish. Only one AI client "
+                "should drive AutoCAD at a time (parallel COM clients can crash AutoCAD's layout tabs). "
+                "Retry when the other client is done, or close it. Nothing was sent to AutoCAD.")
+
+
 # ---------- the STA worker ----------
 
 
 class ComWorker:
-    """Runs callables on one STA thread, one at a time, in submission order."""
+    """Runs callables on one STA thread, one at a time, in submission order.
 
-    def __init__(self) -> None:
+    Each call also holds the cross-process lock, so servers in other processes wait their turn.
+    """
+
+    def __init__(self, cross_process_lock: CrossProcessLock | None = None) -> None:
         self._queue: queue.Queue[tuple[Callable[[], Any], Future]] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self.busy_with: str | None = None
         self.message_filter: MessageFilter | None = None
+        self.cross_process_lock = cross_process_lock or CrossProcessLock()
 
     def _ensure_started(self) -> None:
         with self._lock:
@@ -256,12 +377,22 @@ class ComWorker:
             fn, fut = self._queue.get()
             if not fut.set_running_or_notify_cancel():
                 continue
-            self.busy_with = getattr(fn, "__name__", "call")
+            tool = str(getattr(fn, "__name__", "call"))
+            self.busy_with = tool
+            locked = False
             try:
+                if lock_enabled():
+                    try:
+                        self.cross_process_lock.acquire(tool, lock_wait_seconds())
+                        locked = True
+                    except OSError:  # Windows refused the mutex itself: run as before, unlocked
+                        locked = False
                 fut.set_result(fn())
             except BaseException as exc:  # noqa: BLE001 - surfaced to caller
                 fut.set_exception(exc)
             finally:
+                if locked:
+                    self.cross_process_lock.release()
                 self.busy_with = None
 
     @contextlib.contextmanager

@@ -60,6 +60,12 @@ def process_identity(hwnd: int) -> str | None:
     pid = window_pid(hwnd)
     if pid is None:
         return None
+    return pid_identity(pid)
+
+
+def pid_identity(pid: int) -> str | None:
+    """'<process id>@<start time>' of a running process, or None if it is not running (the start
+    time tells a reused process id apart)."""
     try:
         handle = win32api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         try:

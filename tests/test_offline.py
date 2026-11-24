@@ -2550,6 +2550,112 @@ def test_add_action_answers_per_kind(fake_app, monkeypatch):
             bad()
 
 
+# ---------- one AutoCAD client at a time across server processes (GAP-017) ----------
+
+
+def _lock(tmp_path, tag):
+    return com.CrossProcessLock(name=f"Local\autocad-mcp-test-{tag}-{time.monotonic_ns()}",
+                                holder_file=tmp_path / "com-lock.json")
+
+
+def _hold(lock, release: threading.Event, taken: threading.Event, release_it: bool = True):
+    """Another 'server': takes the lock on its own thread until told to let go."""
+    def run():
+        lock.acquire("draw_line", 1)
+        taken.set()
+        release.wait(5)
+        if release_it:
+            lock.release()
+    t = threading.Thread(target=run)
+    t.start()
+    taken.wait(5)
+    return t
+
+
+def test_a_call_waits_for_another_server_then_fails_with_who_holds_autocad(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOCAD_MCP_LOCK_WAIT_SECONDS", "0.3")
+    held = _lock(tmp_path, "busy")
+    release, taken = threading.Event(), threading.Event()
+    t = _hold(held, release, taken)
+    (tmp_path / "com-lock.json").write_text(json.dumps({"pid": 4242, "tool": "add_viewport", "since": "06:00"}))
+    w = ComWorker(com.CrossProcessLock(name=held.name, holder_file=tmp_path / "com-lock.json"))
+    ran = []
+    with pytest.raises(AcadError, match=r"process 4242, running add_viewport.*Nothing was sent"):
+        w.call(lambda: ran.append(1))
+    assert ran == []  # the tool body never ran
+    release.set()
+    t.join()
+    assert w.call(lambda: "ok") == "ok"  # free again: runs at once
+    holder = json.loads((tmp_path / "com-lock.json").read_text())
+    assert holder["pid"] == __import__("os").getpid() and holder["tool"] == "<lambda>"
+
+
+def test_the_worker_lets_go_of_the_lock_after_each_call(tmp_path):
+    lock = _lock(tmp_path, "release")
+    w = ComWorker(lock)
+    w.call(lambda: None)
+    with pytest.raises(ZeroDivisionError):
+        w.call(lambda: 1 / 0)  # a failing tool must release too
+    other = com.CrossProcessLock(name=lock.name, holder_file=tmp_path / "other.json")
+    got = []
+
+    def take():
+        other.acquire("other", 0.2)
+        got.append(True)
+        other.release()
+    t = threading.Thread(target=take)
+    t.start()
+    t.join()
+    assert got == [True]
+
+
+def test_a_lock_left_by_a_dead_server_is_taken_over(tmp_path):
+    lock = _lock(tmp_path, "abandoned")
+    release, taken = threading.Event(), threading.Event()
+    release.set()
+    _hold(lock, release, taken, release_it=False).join()  # the thread ends still holding it
+    w = ComWorker(com.CrossProcessLock(name=lock.name, holder_file=tmp_path / "com-lock.json"))
+    assert w.call(lambda: "ok") == "ok"
+    assert w.cross_process_lock.abandoned == 1
+
+
+def test_the_lock_can_be_switched_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOCAD_MCP_CROSS_PROCESS_LOCK", "0")
+    monkeypatch.setenv("AUTOCAD_MCP_LOCK_WAIT_SECONDS", "0.1")
+    held = _lock(tmp_path, "off")
+    release, taken = threading.Event(), threading.Event()
+    t = _hold(held, release, taken)
+    try:
+        assert ComWorker(com.CrossProcessLock(name=held.name)).call(lambda: "ran") == "ran"
+    finally:
+        release.set()
+        t.join()
+
+
+def test_the_ownership_record_keeps_other_running_servers_entries(fake_app, monkeypatch):
+    session.identity = "100@2026-11-04T08:00:00"
+    monkeypatch.setattr(session_module, "server_running", lambda s: s == "7@alive")
+    session_module.OWNED_RECORD.write_text(json.dumps({"autocad": "100@2026-11-04T08:00:00", "drawings": [
+        {"key": "other.dwg", "window": 11, "server": "7@alive"},
+        {"key": "gone.dwg", "window": 12, "server": "8@exited"},
+        {"key": "old.dwg", "window": 13}]}), encoding="utf-8")
+    new = documents.new_drawing()
+    record = json.loads(session_module.OWNED_RECORD.read_text(encoding="utf-8"))
+    me = session_module.this_server()
+    assert [(d["key"], d["server"]) for d in record["drawings"]] == [
+        ("other.dwg", "7@alive"), (doc_key(session.find_document(new["name"])), me)]
+    session.forget(doc_key(session.find_document(new["name"])))
+    record = json.loads(session_module.OWNED_RECORD.read_text(encoding="utf-8"))
+    assert [d["key"] for d in record["drawings"]] == ["other.dwg"]  # only this server's entry went
+
+
+def test_this_server_identity_is_pid_and_start_time():
+    import os
+    me = session_module.this_server()
+    assert me.startswith(f"{os.getpid()}@") and session_module.server_running(me)
+    assert not session_module.server_running("not-a-server")
+
+
 # ---------- acad_status health (GAP-017 c) ----------
 
 

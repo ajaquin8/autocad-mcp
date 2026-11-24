@@ -73,6 +73,16 @@ Status: **built; verified live 2026-11-04** ([[Sources/2026-11-04 Ownership acro
 ## Supersedes / superseded by
 None.
 
+## 2026-11-24: one AutoCAD client at a time across server processes (GAP-017, slice a)
+Status: **built; not live-verified** (gd-coder, Hermes morning MCP-fix lane, from the NightDraft gap log backlog).
+- **Why (user-reported 2026-11-23):** up to four autocad-mcp processes (Hermes profiles and the Claude desktop extension) talked to one AutoCAD with no lock between them. Inside one server every call is already serialized on the STA worker; across processes nothing was. Parallel COM clients are the suspected cause of AutoCAD's layout tabs crashing (**inferred**, not reproduced).
+- **Lock:** the COM worker holds a named Win32 mutex (`Local\autocad-mcp-com`, one per Windows login) for the whole of each tool call. A call waits up to 30 s (`AUTOCAD_MCP_LOCK_WAIT_SECONDS`) and then fails with "AutoCAD is in use by another autocad-mcp server (process N, running <tool> since <time>)", before anything is sent to AutoCAD. The last holder is written to `%LOCALAPPDATA%\autocad-mcp\com-lock.json`. `AUTOCAD_MCP_CROSS_PROCESS_LOCK=0` switches it off.
+  - If a server dies holding the lock, Windows hands it to the next waiter (WAIT_ABANDONED), which carries on.
+  - If Windows refuses to create the mutex, calls run unlocked, as before.
+  - `cancel_command` does not use the COM worker, so it is never held up by the lock.
+- **Ownership record:** each entry in `owned.json` now names the server process that wrote it (`server`: pid@start time). A server keeps the entries of other servers that are still running against the same AutoCAD instead of overwriting them, and the file is written through a temporary file and a rename. All writes happen on the worker, inside the lock. Old entries without `server` are dropped on the next write, as every write did before.
+- **Not in this slice:** cancelling queued calls when the client gives up, per-call deadlines (slice b), and acad_status checks for crash dialogs and competing processes (slice c). A timed-out call still runs later inside AutoCAD, and holds the lock while it does.
+
 ## 2026-11-24: acad_status health and crash windows (GAP-017, slice c)
 Status: **built; not live-verified against AutoCAD** (gd-coder, Hermes morning MCP-fix lane, from the NightDraft gap log backlog).
 - **Why (user-reported 2026-11-23):** `acad_status` and the busy hints only looked at windows owned by acad.exe. The Autodesk crash reporter runs as its own process, so a crashed AutoCAD looked like a merely busy one. Several autocad-mcp servers were running against one AutoCAD and nothing said so.
@@ -83,4 +93,4 @@ Status: **built; not live-verified against AutoCAD** (gd-coder, Hermes morning M
   - `other_autocad_mcp_servers`: from WMI `Win32_Process`, by command line. It leaves out this server and the processes that started it, and counts a launcher (uv, autocad-mcp.exe) and its Python once. **verified** on homepc 2026-11-24 with a scratch script (no AutoCAD call): it found 4 other servers (2 Claude desktop extension, 2 Hermes .venv) in 0.27 s.
   - `warning`: one sentence when any of the above is off; the tool description tells the model to pass it on to the user.
 - **Errors:** busy, timed-out and lost-connection errors now also name a crash window ("AutoCAD has probably crashed ... Do not retry").
-- **Not in this slice:** the cross-process lock (slice a, PR #35) and cancelling queued calls (slice b).
+- **Not in this slice:** the cross-process lock (slice a, PR #35, section above) and cancelling queued calls (slice b).

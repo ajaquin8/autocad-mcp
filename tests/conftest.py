@@ -5,14 +5,21 @@ from __future__ import annotations
 import math
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Tests must never wait for (or block) a real autocad-mcp server on this PC: own lock, own holder file.
+os.environ["AUTOCAD_MCP_LOCK_NAME"] = f"Local\\autocad-mcp-test-{os.getpid()}"
 
+from autocad_mcp import com as com_module  # noqa: E402
 from autocad_mcp import session as session_module  # noqa: E402
 from autocad_mcp.com import enums  # noqa: E402
 from autocad_mcp.session import session  # noqa: E402
+
+com_module.LOCK_HOLDER = Path(tempfile.gettempdir()) / f"autocad-mcp-test-lock-{os.getpid()}.json"
 
 
 def _xyz(variant) -> tuple:
