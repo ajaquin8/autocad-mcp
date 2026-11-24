@@ -1,4 +1,4 @@
-"""Change existing entities by handle: move, change properties, delete."""
+"""Change existing entities by handle: move, change properties, replace text, delete."""
 
 from __future__ import annotations
 
@@ -77,6 +77,42 @@ def change_properties(entity_handles: str | list[str], layer: str = "", color: i
                 ent.Linetype = linetype
             result.append(summary(ent))
         return result
+
+
+TEXT_TYPES = {"AcDbText": "TEXT", "AcDbMText": "MTEXT", "AcDbAttributeDefinition": "attribute definition",
+              "AcDbMLeader": "multileader"}
+
+
+@acad_tool()
+def set_text(entity_handle: str, text: str, name: str = "") -> dict:
+    """Replace the words of one existing TEXT, MTEXT, attribute definition (its default value) or
+    multileader. The handle and every other property stay as they are: position, justification,
+    height, rotation, style, layer, width factor, oblique angle and background mask. One undo step.
+    For an attribute on a placed block use set_block_attributes.
+
+    Args:
+        entity_handle: the text's handle (see get_entity or query_entities).
+        text: the new text. MTEXT and multileaders take formatting codes, e.g. \\P for a new line.
+            A field code such as %<\\AcVar Filename \\f "%fn6">% becomes a live field.
+        name: which open drawing (default: active).
+    """
+    if not text:
+        raise AcadError("Give the new text; to remove the object use delete_entities.")
+    doc = session.document(name)
+    with session.edit(doc) as change:
+        ent = by_handle(doc, entity_handle)
+        kind = str(ent.ObjectName)
+        if kind not in TEXT_TYPES:
+            raise AcadError(f"Handle {str(entity_handle).strip().upper()} is {kind}, not text; set_text changes "
+                            f"{', '.join(TEXT_TYPES.values())} only.")
+        old = str(ent.TextString)
+        change.on_rollback(lambda: setattr(ent, "TextString", old))
+        ent.TextString = text
+        if "%<" in text:
+            doc.Regen(1)  # acAllViewports: a new field shows its value after a regen
+        info = summary(ent)
+        info.update(old_text=old, text=str(ent.TextString))
+        return info
 
 
 @acad_tool(destructive=True)
