@@ -14,9 +14,9 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from .com import AcadError, AcadTimeout, describe_attribute_error, describe_com_error, worker
+from .com import RPC_GONE_CODES, AcadError, AcadTimeout, describe_attribute_error, describe_com_error, worker
 from .session import is_busy_error, session
-from .winui import describe_blockers
+from .winui import describe_blockers, describe_crash
 
 INSTRUCTIONS = """\
 Drives the AutoCAD session already running on this PC (acad_status reports the version).
@@ -73,9 +73,11 @@ def _where(err: BaseException) -> str:
 
 
 def _blockers(err: BaseException) -> str:
-    """For a busy or timed-out call: which AutoCAD dialog is in the way, if one is (no COM)."""
-    if isinstance(err, AcadTimeout) or is_busy_error(err):
-        return describe_blockers(session.hwnd)
+    """For a busy, timed-out or lost call: which AutoCAD dialog is in the way, or a crash report
+    window, if one is (no COM)."""
+    gone = isinstance(err, pywintypes.com_error) and bool(err.args) and err.args[0] in RPC_GONE_CODES
+    if isinstance(err, AcadTimeout) or is_busy_error(err) or gone:
+        return describe_blockers(session.hwnd) + describe_crash()
     return ""
 
 

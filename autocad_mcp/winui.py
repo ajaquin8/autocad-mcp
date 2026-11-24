@@ -147,3 +147,79 @@ def describe_blockers(main: int | None) -> str:
         parts.append(text)
     return (f" AutoCAD shows the dialog {'; '.join(parts)}. It blocks every call until it is answered; "
             "ask the user to answer it (cancel_command cannot close dialogs).")
+
+
+# ---------- health: crash reports, a hung AutoCAD, other autocad-mcp servers (GAP-017 c) ----------
+
+# Window titles of AutoCAD's fatal-error box ("AutoCAD Error Aborting", text "FATAL ERROR: ...") and of
+# the Autodesk crash reporter, which runs as its own process (senddmp.exe), so blocking_dialogs, which
+# only looks at acad.exe's windows, never saw it. Lower case, matched as parts of the title (inferred
+# from Autodesk support articles; not yet seen live through this server).
+CRASH_TITLES = ("fatal error", "error aborting", "error report", "crash report")
+CRASH_PROCESSES = ("senddmp.exe", "adskerrorreporting.exe", "cer.exe")
+
+
+def process_image(pid: int) -> str:
+    """File name of a process's program, lower case ('acad.exe'), or '' if it cannot be read."""
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                    ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(1024)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value.rsplit("\\", 1)[-1].lower()
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def crash_dialogs() -> list[dict]:
+    """Visible top-level windows of any process that look like an AutoCAD fatal error or the
+    Autodesk crash reporter: [{title, program}]."""
+    found: list[dict] = []
+
+    def visit(hwnd: int, _: Any) -> bool:
+        with contextlib.suppress(Exception):
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            title = win32gui.GetWindowText(hwnd).strip()
+            pid = window_pid(hwnd)
+            program = process_image(pid) if pid else ""
+            if (title and any(t in title.lower() for t in CRASH_TITLES)) or program in CRASH_PROCESSES:
+                found.append({"title": title, "program": program})
+        return True
+
+    with contextlib.suppress(Exception):
+        win32gui.EnumWindows(visit, None)
+    return found
+
+
+def is_hung(hwnd: int | None) -> bool:
+    """True if Windows considers the window not responding (no messages handled for about 5 s)."""
+    if not hwnd:
+        return False
+    try:
+        return bool(ctypes.windll.user32.IsHungAppWindow(wintypes.HWND(hwnd)))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def describe_crash() -> str:
+    """' Windows shows "AutoCAD Error Aborting" (acad.exe): AutoCAD has probably crashed ...' or ''."""
+    try:
+        dialogs = crash_dialogs()
+    except Exception:  # noqa: BLE001 - only ever an extra hint
+        return ""
+    if not dialogs:
+        return ""
+    names = "; ".join(f"\"{d['title'] or '(untitled)'}\"" + (f" ({d['program']})" if d["program"] else "")
+                      for d in dialogs[:3])
+    return (f" Windows shows {names}: AutoCAD has probably crashed or is writing a crash report. Do not "
+            "retry; tell the user (unsaved work may need recovery when AutoCAD restarts).")

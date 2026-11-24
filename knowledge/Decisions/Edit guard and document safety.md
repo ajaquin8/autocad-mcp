@@ -82,3 +82,15 @@ Status: **built; not live-verified** (gd-coder, Hermes morning MCP-fix lane, fro
   - `cancel_command` does not use the COM worker, so it is never held up by the lock.
 - **Ownership record:** each entry in `owned.json` now names the server process that wrote it (`server`: pid@start time). A server keeps the entries of other servers that are still running against the same AutoCAD instead of overwriting them, and the file is written through a temporary file and a rename. All writes happen on the worker, inside the lock. Old entries without `server` are dropped on the next write, as every write did before.
 - **Not in this slice:** cancelling queued calls when the client gives up, per-call deadlines (slice b), and acad_status checks for crash dialogs and competing processes (slice c). A timed-out call still runs later inside AutoCAD, and holds the lock while it does.
+
+## 2026-11-24: acad_status health and crash windows (GAP-017, slice c)
+Status: **built; not live-verified against AutoCAD** (gd-coder, Hermes morning MCP-fix lane, from the NightDraft gap log backlog).
+- **Why (user-reported 2026-11-23):** `acad_status` and the busy hints only looked at windows owned by acad.exe. The Autodesk crash reporter runs as its own process, so a crashed AutoCAD looked like a merely busy one. Several autocad-mcp servers were running against one AutoCAD and nothing said so.
+- **`acad_status` → `health`:**
+  - `autocad_not_responding`: Win32 `IsHungAppWindow` on AutoCAD's main window.
+  - `crash_dialogs`: visible top-level windows of any process whose title contains "fatal error", "error aborting", "error report" or "crash report", or that belong to senddmp.exe / adskerrorreporting.exe / cer.exe. **inferred** from Autodesk support articles; not yet seen live through this server.
+  - `layouts`: the active drawing's `ActiveLayout.Name` and `Layouts.Count`, or the error AutoCAD gave (the reported crash was in the layout interface).
+  - `other_autocad_mcp_servers`: from WMI `Win32_Process`, by command line. It leaves out this server and the processes that started it, and counts a launcher (uv, autocad-mcp.exe) and its Python once. **verified** on homepc 2026-11-24 with a scratch script (no AutoCAD call): it found 4 other servers (2 Claude desktop extension, 2 Hermes .venv) in 0.27 s.
+  - `warning`: one sentence when any of the above is off; the tool description tells the model to pass it on to the user.
+- **Errors:** busy, timed-out and lost-connection errors now also name a crash window ("AutoCAD has probably crashed ... Do not retry").
+- **Not in this slice:** the cross-process lock (slice a, PR #35, section above) and cancelling queued calls (slice b).
