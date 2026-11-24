@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
+import win32com.client
+
+from .. import winui
 from ..app import acad_tool
 from ..com import AcadError, worker
 from ..session import doc_key, product_name, session
@@ -14,6 +18,11 @@ def acad_status(start_if_needed: bool = False) -> dict:
     """Connect to AutoCAD and report which AutoCAD it is (e.g. "AutoCAD 2026"), the open
     drawings and which of them this server may edit. Call this first. Name the AutoCAD
     by the "autocad" field; "autocad_version" is AutoCAD's raw release number.
+
+    "health" says whether Windows reports AutoCAD as not responding, shows a crash report
+    or fatal-error window, whether the active drawing's layouts answer, and which other
+    autocad-mcp servers are running (parallel clients can crash AutoCAD's layout tabs).
+    If "health" has a "warning", tell the user before doing more work.
 
     Args:
         start_if_needed: launch AutoCAD if it is not running (default False).
@@ -31,7 +40,61 @@ def acad_status(start_if_needed: bool = False) -> dict:
             "active_units": session.units(active) if active is not None else None,
             "open_drawings": [session.describe(d) for d in docs],
             "edit_guard": "off (AUTOCAD_MCP_ALLOW_ALL_EDITS)" if session.allow_all_edits else "on",
+            "health": _health(active),
         }
+
+
+def _layouts(doc: Any) -> dict:
+    """The active drawing's layout probe: active layout and count, or the error AutoCAD gave."""
+    try:
+        return {"active": str(doc.ActiveLayout.Name), "count": int(doc.Layouts.Count)}
+    except Exception as err:  # noqa: BLE001 - reported, not raised: this is a health check
+        return {"error": f"{type(err).__name__}: {err}"[:300]}
+
+
+def _other_servers() -> list[dict]:
+    """Other autocad-mcp server processes on this PC, one per server (a launcher and the Python it
+    starts count once), found through WMI. This server and the processes that started it are left
+    out. [] if WMI cannot be asked."""
+    try:
+        wmi = win32com.client.GetObject("winmgmts:\\\\.\\root\\cimv2")
+        rows = wmi.ExecQuery("SELECT ProcessId, ParentProcessId, CommandLine FROM Win32_Process "
+                             "WHERE CommandLine LIKE '%autocad_mcp%' OR CommandLine LIKE '%autocad-mcp%'")
+        procs = {int(r.ProcessId): (int(r.ParentProcessId), str(r.CommandLine or "")) for r in rows}
+    except Exception:  # noqa: BLE001 - only ever an extra hint
+        return []
+    mine = {os.getpid()}
+    current = os.getppid()
+    while current and current not in mine:  # this server's launcher chain (uv, autocad-mcp.exe ...)
+        mine.add(current)
+        if current not in procs:
+            break
+        current = procs[current][0]
+    return [{"pid": pid, "command": cmd[:200]} for pid, (ppid, cmd) in sorted(procs.items())
+            if pid not in mine and ppid not in procs]
+
+
+def _health(active: Any) -> dict:
+    health: dict = {
+        "autocad_not_responding": winui.is_hung(session.hwnd),
+        "crash_dialogs": winui.crash_dialogs(),
+        "other_autocad_mcp_servers": _other_servers(),
+    }
+    if active is not None:
+        health["layouts"] = _layouts(active)
+    problems = []
+    if health["autocad_not_responding"]:
+        problems.append("Windows reports AutoCAD as not responding")
+    if health["crash_dialogs"]:
+        problems.append("a crash report or fatal-error window is open")
+    if "error" in health.get("layouts", {}):
+        problems.append("the active drawing's layouts did not answer")
+    if health["other_autocad_mcp_servers"]:
+        problems.append(f"{len(health['other_autocad_mcp_servers'])} other autocad-mcp server(s) are running; "
+                        "only one AI client should drive AutoCAD at a time")
+    if problems:
+        health["warning"] = "; ".join(problems) + "."
+    return health
 
 
 @acad_tool(read_only=True)

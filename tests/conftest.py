@@ -468,5 +468,11 @@ def fake_app(monkeypatch, tmp_path):
         "acAttributeModeInvisible": 1, "acAttributeModeConstant": 2, "acAttributeModePreset": 8,
         "acAttributeModeLockPosition": 16})
     monkeypatch.setattr(session_module, "SETTLE_PAUSE", 0)
+    # acad_status health looks at the real desktop and process list; keep tests independent of this PC.
+    from autocad_mcp import winui
+    from autocad_mcp.tools import documents
+    monkeypatch.setattr(documents, "_other_servers", lambda: [])
+    monkeypatch.setattr(winui, "crash_dialogs", lambda: [])
+    monkeypatch.setattr(winui, "is_hung", lambda hwnd: False)
     monkeypatch.setattr(session, "hwnd", None)
     return app

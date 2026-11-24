@@ -2548,3 +2548,81 @@ def test_add_action_answers_per_kind(fake_app, monkeypatch):
                 lambda: block_authoring.add_action("move", [0, 0], box, end="middle")]:
         with pytest.raises(ValueError):
             bad()
+
+
+# ---------- acad_status health (GAP-017 c) ----------
+
+
+def test_crash_windows_of_any_process_are_found(monkeypatch):
+    from autocad_mcp import winui as real  # no fake_app here, so these are the real helpers
+    desk = _Desktop({1: (42, "AfxFrame", "AutoCAD 2027", True, []),
+                     2: (42, "#32770", "AutoCAD Error Aborting", True, ["OK"]),
+                     3: (77, "#32770", "Autodesk Error Report", True, ["Send"]),
+                     4: (88, "Window", "", True, []),           # untitled window of the crash reporter
+                     5: (99, "Notepad", "notes.txt", True, [])})  # unrelated
+    monkeypatch.setattr(real, "win32gui", desk)
+    monkeypatch.setattr(real, "window_pid", desk.pid)
+    monkeypatch.setattr(real, "process_image", lambda pid: {42: "acad.exe", 77: "senddmp.exe",
+                                                            88: "senddmp.exe", 99: "notepad.exe"}[pid])
+    found = real.crash_dialogs()
+    assert [d["title"] for d in found] == ["AutoCAD Error Aborting", "Autodesk Error Report", ""]
+    note = real.describe_crash()
+    assert '"AutoCAD Error Aborting" (acad.exe)' in note and "Do not retry" in note
+    monkeypatch.setattr(real, "crash_dialogs", lambda: [])
+    assert real.describe_crash() == ""
+
+
+def test_status_reports_health_and_warns(fake_app, monkeypatch):
+    from autocad_mcp import winui
+    status = documents.acad_status()
+    assert status["health"] == {"autocad_not_responding": False, "crash_dialogs": [],
+                                "other_autocad_mcp_servers": [], "layouts": {"active": "Model", "count": 2}}
+    monkeypatch.setattr(documents, "_other_servers", lambda: [{"pid": 4242, "command": "python -m autocad_mcp"}])
+    monkeypatch.setattr(winui, "is_hung", lambda hwnd: True)
+
+    class Broken:
+        @property
+        def Name(self):  # noqa: N802
+            raise RuntimeError("layout interface gone")
+    fake_app.doc.ActiveLayout = Broken()
+    health = documents.acad_status()["health"]
+    assert health["layouts"] == {"error": "RuntimeError: layout interface gone"}
+    assert health["warning"] == ("Windows reports AutoCAD as not responding; the active drawing's layouts did not "
+                                 "answer; 1 other autocad-mcp server(s) are running; only one AI client should "
+                                 "drive AutoCAD at a time.")
+
+
+def test_a_timed_out_call_names_a_crash_window(fake_app, monkeypatch):
+    from autocad_mcp import app as app_module
+    from autocad_mcp import winui
+    monkeypatch.setattr(winui, "crash_dialogs", lambda: [{"title": "AutoCAD Error Aborting", "program": "acad.exe"}])
+    assert "probably crashed" in app_module._blockers(AcadTimeout("no answer"))
+    gone = pywintypes.com_error(-2147023174, "The RPC server is unavailable.", None, None)
+    assert "probably crashed" in app_module._blockers(gone)
+    assert app_module._blockers(ValueError("bad input")) == ""
+
+
+def test_other_servers_leaves_out_this_server_and_counts_launchers_once(monkeypatch):
+    import types
+
+    from autocad_mcp.tools import documents as docs_module
+    rows = [types.SimpleNamespace(ProcessId=p, ParentProcessId=pp, CommandLine=c) for p, pp, c in [
+        (10, 1, "uv run -m autocad_mcp"),        # this server's launcher
+        (11, 10, "python -m autocad_mcp"),       # this server
+        (20, 2, "autocad-mcp.exe"),              # another server's launcher...
+        (21, 20, "python -m autocad_mcp"),       # ...and its Python: one server
+        (30, 3, "python -m autocad_mcp")]]       # a third server
+
+    class Wmi:
+        def ExecQuery(self, query):  # noqa: N802
+            assert "Win32_Process" in query
+            return rows
+    monkeypatch.setattr(docs_module.win32com.client, "GetObject", lambda moniker: Wmi())
+    monkeypatch.setattr(docs_module.os, "getpid", lambda: 11)
+    monkeypatch.setattr(docs_module.os, "getppid", lambda: 10)
+    assert [s["pid"] for s in docs_module._other_servers()] == [20, 30]
+
+    def no_wmi(moniker):
+        raise OSError("WMI unavailable")
+    monkeypatch.setattr(docs_module.win32com.client, "GetObject", no_wmi)
+    assert docs_module._other_servers() == []
