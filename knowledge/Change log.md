@@ -349,6 +349,12 @@ Writer: Claude Code, on the user's go ("Start B4, T11"), step 6 of the improveme
 - Tests: 4 new offline tests (157 in the whole suite); the five checks pass. `tests/live/flip_and_state_order_check.py` is ready but has not been run. **Not live-verified.**
 - 2026-11-23: version 0.1.9 in `pyproject.toml` and `app.py`, on Alex's go ("3. Yes" to rebuilding the Claude desktop bundle), so a bundle built from `main` (PRs #25 to #31: import_blocks overwrite, activate_document, text justification, layout= drawing, dynamic block tools) can be told apart from the installed 0.1.8 bundle of about 2026-11-13. Bundle built with `scripts/build_mcpb.py`; **not verified** through an installed bundle.
 
+## 2026-11-23: add_viewport retries when AutoCAD has no active model space viewport (GAP-014)
+Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log. Branch `gap/GAP-014-viewport-mspace`.
+- **user-reported (night run 2026-11-22):** `add_viewport` on a fresh layout failed at `doc.MSpace = True` with "There is no active modelspace viewport. Switching to paperspace (0x8021005E)"; it had worked earlier the same night on another sheet.
+- **Fix:** if `MSpace = True` is refused, the tool zooms the sheet's paper view onto the new viewport (5% margin), regenerates, turns the viewport on again and tries once more. If AutoCAD still refuses, the tool rolls back and says what to check (window not minimised, sheet tab showing). The path that already worked is unchanged.
+- Tests: 2 new offline tests (159 in the whole suite); the five checks pass. **Not live-verified:** drawings with unsaved changes and a drawing from a network drive were open in AutoCAD, so the lane's safety check did not allow a live run. Why the retry should help: [[Research/AutoCAD API gotchas]] (2026-11-23).
+
 ## 2026-11-23: set_text replaces the words of an existing text in place (GAP-005)
 Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log. Branch `gap/GAP-005-set-text`.
 - **user-reported (night run 2026-11-22):** there was no way to change the words of an existing TEXT or MTEXT. The workaround (delete and re-create) changed the handle and lost width factor, oblique angle, background mask and field codes unless they were given again by hand.
