@@ -98,8 +98,13 @@ def acad_tool(*, read_only: bool = False, destructive: bool = False,
                 return _render(fn(*args, **kwargs))
             run.__name__ = fn.__name__
             try:
-                return await anyio.to_thread.run_sync(
-                    lambda: worker.call(run, timeout=timeout), abandon_on_cancel=True)
+                fut = worker.submit(run, timeout=timeout)
+                try:
+                    return await anyio.to_thread.run_sync(
+                        lambda: worker.wait(fut, timeout=timeout), abandon_on_cancel=True)
+                except anyio.get_cancelled_exc_class():
+                    fut.cancel()  # the client gave up: drop the call if AutoCAD has not started it
+                    raise
             except AcadError as err:
                 raise ToolError(str(err) + _blockers(err)) from None
             except pywintypes.com_error as err:

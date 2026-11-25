@@ -49,6 +49,10 @@ class AcadTimeout(AcadError):
     pass
 
 
+class AcadStuck(AcadTimeout):
+    """Refused at once: an earlier call timed out and is still running on the COM thread."""
+
+
 # ---------- coordinates and angles ----------
 
 
@@ -348,15 +352,24 @@ class ComWorker:
     """Runs callables on one STA thread, one at a time, in submission order.
 
     Each call also holds the cross-process lock, so servers in other processes wait their turn.
+
+    A call that timed out or that the client cancelled before it started is dropped from the
+    queue, so it can no longer run minutes later. One that had already started cannot be
+    stopped (COM has no way to interrupt AutoCAD); while it is still running, new calls fail at
+    once instead of queueing behind it (GAP-017 slice b).
     """
 
     def __init__(self, cross_process_lock: CrossProcessLock | None = None) -> None:
-        self._queue: queue.Queue[tuple[Callable[[], Any], Future]] = queue.Queue()
+        self._queue: queue.Queue[tuple[Callable[[], Any], Future, float]] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self.busy_with: str | None = None
+        self.busy_since: float | None = None
         self.message_filter: MessageFilter | None = None
         self.cross_process_lock = cross_process_lock or CrossProcessLock()
+        self._stuck: Future | None = None  # a call that timed out after it had started
+        self._stuck_tool = ""
+        self.dropped = 0  # queued calls never run because they timed out or were cancelled first
 
     def _ensure_started(self) -> None:
         with self._lock:
@@ -374,16 +387,21 @@ class ComWorker:
             except OSError:  # without it, a busy AutoCAD fails at once, as before
                 self.message_filter = None
         while True:
-            fn, fut = self._queue.get()
+            fn, fut, deadline = self._queue.get()
+            if time.monotonic() >= deadline:
+                fut.cancel()  # its caller already gave up: never start it late
             if not fut.set_running_or_notify_cancel():
+                self.dropped += 1
                 continue
             tool = str(getattr(fn, "__name__", "call"))
             self.busy_with = tool
+            self.busy_since = time.monotonic()
             locked = False
             try:
                 if lock_enabled():
                     try:
-                        self.cross_process_lock.acquire(tool, lock_wait_seconds())
+                        wait = min(lock_wait_seconds(), max(0.0, deadline - time.monotonic()))
+                        self.cross_process_lock.acquire(tool, wait)
                         locked = True
                     except OSError:  # Windows refused the mutex itself: run as before, unlocked
                         locked = False
@@ -394,6 +412,7 @@ class ComWorker:
                 if locked:
                     self.cross_process_lock.release()
                 self.busy_with = None
+                self.busy_since = None
 
     @contextlib.contextmanager
     def quick_retries(self, seconds: float = QUICK_RETRY_SECONDS) -> Iterator[None]:
@@ -409,18 +428,49 @@ class ComWorker:
         finally:
             f.limit_ms = previous
 
+    def submit(self, fn: Callable[[], T], timeout: float = 180.0) -> Future:
+        """Queue `fn` for the worker thread. It is dropped instead of run if it has not started
+        within `timeout` seconds. AcadStuck if an earlier call timed out and is still running."""
+        self._ensure_started()
+        stuck = self._stuck
+        if stuck is not None:
+            if not stuck.done():
+                raise AcadStuck(self.stuck_message())
+            self._stuck = None
+        fut: Future = Future()
+        self._queue.put((fn, fut, time.monotonic() + timeout))
+        return fut
+
+    def wait(self, fut: Future, timeout: float = 180.0) -> Any:
+        """The result of a submitted call. On timeout the call is dropped if it never started;
+        if it had started, it is remembered as stuck so new calls fail fast until it ends."""
+        try:
+            return fut.result(timeout=timeout)
+        except FutureTimeout:
+            if fut.cancel():
+                raise AcadTimeout(
+                    f"AutoCAD did not get to this call within {timeout:.0f}s (an earlier call or another "
+                    "autocad-mcp server kept it busy), so it was dropped. Nothing was sent to AutoCAD; "
+                    "check acad_status, then retry.") from None
+            if fut.done():  # it finished just now
+                return fut.result()
+            self._stuck, self._stuck_tool = fut, self.busy_with or "call"
+            raise AcadTimeout(
+                f"No answer from AutoCAD after {timeout:.0f}s. The operation may still be "
+                "running inside AutoCAD; do NOT repeat it. Check acad_status first.") from None
+
+    def stuck_message(self) -> str:
+        since = self.busy_since
+        running = f" for {time.monotonic() - since:.0f}s" if since is not None else ""
+        return (f"An earlier call ({self._stuck_tool}) timed out and is still running inside AutoCAD{running}. "
+                "Nothing was sent to AutoCAD. Ask the user to look at AutoCAD (a dialog, a prompt, or a long "
+                "operation); retry once it has finished. Do NOT repeat the earlier call.")
+
     def call(self, fn: Callable[[], T], timeout: float = 180.0) -> T:
         self._ensure_started()
         if threading.current_thread() is self._thread:
             return fn()
-        fut: Future = Future()
-        self._queue.put((fn, fut))
-        try:
-            return fut.result(timeout=timeout)
-        except FutureTimeout:
-            raise AcadTimeout(
-                f"No answer from AutoCAD after {timeout:.0f}s. The operation may still be "
-                "running inside AutoCAD; do NOT repeat it. Check acad_status first.") from None
+        return self.wait(self.submit(fn, timeout), timeout)
 
 
 worker = ComWorker()

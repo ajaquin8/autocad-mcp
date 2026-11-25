@@ -210,6 +210,78 @@ def test_worker_times_out_without_repeating():
         w.call(lambda: time.sleep(0.5), timeout=0.05)
 
 
+def test_a_queued_call_that_timed_out_is_dropped_not_run_later():
+    # GAP-017(b): a call still waiting in the queue when its caller gave up used to run minutes later.
+    w = ComWorker()
+    gate = threading.Event()
+    first = w.submit(lambda: gate.wait(5), timeout=5)
+    ran = []
+    with pytest.raises(AcadTimeout, match="dropped. Nothing was sent"):
+        w.call(lambda: ran.append(1), timeout=0.1)
+    gate.set()
+    first.result(5)
+    assert w.call(lambda: "next") == "next"
+    assert ran == [] and w.dropped == 1
+
+
+def test_a_call_whose_deadline_passed_in_the_queue_never_starts():
+    w = ComWorker()
+    gate = threading.Event()
+    w.submit(lambda: gate.wait(5), timeout=5)
+    ran = []
+    late = w.submit(lambda: ran.append(1), timeout=0.05)  # nobody waits on it with a timeout
+    time.sleep(0.2)
+    gate.set()
+    assert w.call(lambda: "next") == "next"
+    assert ran == [] and late.cancelled()
+
+
+def test_new_calls_fail_fast_while_a_timed_out_call_is_still_running():
+    w = ComWorker()
+    gate = threading.Event()
+
+    def slow_tool():
+        gate.wait(5)
+    with pytest.raises(AcadTimeout, match="do NOT repeat"):
+        w.call(slow_tool, timeout=0.1)
+    started = time.monotonic()
+    with pytest.raises(com.AcadStuck, match=r"earlier call \(slow_tool\) timed out.*Nothing was sent"):
+        w.call(lambda: "x", timeout=5)
+    assert time.monotonic() - started < 1  # refused at once, not after another timeout
+    gate.set()
+    deadline = time.monotonic() + 5
+    while w.busy_with and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert w.call(lambda: "free again") == "free again"
+
+
+def test_a_client_cancel_drops_the_queued_tool_call(fake_app, monkeypatch):
+    # GAP-017(b): anyio's abandon_on_cancel left the queued call to run after the client cancelled.
+    import anyio
+
+    from autocad_mcp import app as app_module
+    gate = threading.Event()
+    blocker = app_module.worker.submit(lambda: gate.wait(5), timeout=10)
+    calls = []
+    monkeypatch.setattr(app_module.worker, "submit", _recording_submit(app_module.worker.submit, calls))
+
+    async def cancel_soon():
+        with anyio.move_on_after(0.2):
+            await mcp.call_tool("list_documents", {})
+    asyncio.run(cancel_soon())
+    gate.set()
+    blocker.result(5)
+    assert len(calls) == 1 and calls[0].cancelled()
+
+
+def _recording_submit(submit, calls):
+    def record(fn, timeout=180.0):
+        fut = submit(fn, timeout)
+        calls.append(fut)
+        return fut
+    return record
+
+
 # ---------- edit and busy guards ----------
 
 
