@@ -147,6 +147,13 @@ class FakeSpace:
     def AddCircle(self, center, radius):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbCircle", Center=_xyz(center), Radius=radius))
 
+    def AddArc(self, center, radius, start, end):  # noqa: N802 - angles in radians, as over COM
+        return self._add(FakeEntity(self.doc, "AcDbArc", Center=_xyz(center), Radius=radius,
+                                    StartAngle=start, EndAngle=end))
+
+    def AddLightWeightPolyline(self, flat):  # noqa: N802
+        return self._add(FakePolyline(self.doc, "AcDbPolyline", Coordinates=tuple(_xyz(flat)), Closed=False))
+
     def AddAttribute(self, height, mode, prompt, insertion, tag, value):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbAttributeDefinition", Height=height, Mode=mode,
                                     PromptString=prompt, InsertionPoint=_xyz(insertion), TagString=tag,
@@ -181,6 +188,11 @@ class FakeSpace:
             raise RuntimeError("paper space is not active")
         return self._add(FakeViewport(self.doc, "AcDbViewport", Center=_xyz(center), Width=width, Height=height,
                                       StandardScale=0, CustomScale=1.0, DisplayLocked=False, displayed=False))
+
+
+class FakePolyline(FakeEntity):
+    def SetBulge(self, index: int, bulge: float) -> None:  # noqa: N802
+        self.__dict__.setdefault("bulges", {})[index] = bulge
 
 
 class FakeViewport(FakeEntity):

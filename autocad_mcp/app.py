@@ -33,7 +33,9 @@ tools work on any open drawing.
 Typical workflow: acad_status -> new_drawing -> add_layer -> draw_* / add_text /
 add_dimension / insert_block -> capture_view to check the result visually ->
 save_document. Each drawing tool is one undo step and is rolled back
-automatically if it fails. Results report entity handles; use them with
+automatically if it fails. For many objects at once (a schedule grid, a detail, a
+profile), create_entities draws up to 2000 lines/polylines/circles/arcs/texts in one
+call and one undo step, all or nothing. Results report entity handles; use them with
 get_entity, move_entities, change_properties, set_text and delete_entities.
 run_command, the Block Editor tools, zoom_extents and capture_view work in the active
 drawing only; activate_document switches to another open drawing (only while the user
