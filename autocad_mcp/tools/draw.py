@@ -8,7 +8,7 @@ from typing import Any
 import pywintypes
 
 from ..app import acad_tool
-from ..com import AcadError, doubles, enums, point, rad, xyz
+from ..com import AcadError, describe_com_error, doubles, enums, point, rad, xyz
 from ..session import Edit, session
 from .entities import details, find_layout
 from .layers import find_layer
@@ -321,3 +321,179 @@ def add_mtext(text: str, position: Point, width: float, height: float = 0, layer
         info = place(change, ent, layer, where)
         info["attachment"] = key
         return info
+
+
+# ---------- many entities in one call (GAP-018) ----------
+
+MAX_BATCH = 2000
+# Fields each entity type takes: (required, optional). Anything else is refused, so a typo
+# ("raduis") fails before AutoCAD is touched instead of being silently ignored.
+BATCH_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "line": (("start", "end"), ("layer",)),
+    "polyline": (("points",), ("closed", "bulges", "layer")),
+    "circle": (("center", "radius"), ("layer",)),
+    "arc": (("center", "radius", "start_angle", "end_angle"), ("layer",)),
+    "text": (("text", "position", "height"), ("rotation", "justify", "style", "layer")),
+    "mtext": (("text", "position", "width"), ("height", "attachment", "style", "layer")),
+}
+
+
+def _number(value: Any, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{what} must be a number, got {value!r}")
+    return float(value)
+
+
+def check_batch_entity(spec: Any) -> dict:
+    """One create_entities entry, checked without AutoCAD; ValueError says what is wrong."""
+    if not isinstance(spec, dict):
+        raise ValueError(f"each entity is an object with a \"type\", got {spec!r}")
+    kind = str(spec.get("type", "")).strip().lower()
+    if kind not in BATCH_FIELDS:
+        raise ValueError(f"type is one of {', '.join(BATCH_FIELDS)}; got {spec.get('type')!r}")
+    required, optional = BATCH_FIELDS[kind]
+    missing = [f for f in required if f not in spec]
+    unknown = [f for f in spec if f != "type" and f not in required + optional]
+    if unknown:
+        raise ValueError(f"unknown field(s) {', '.join(unknown)}; a {kind} takes {', '.join(required + optional)}")
+    if missing:
+        raise ValueError(f"missing {', '.join(missing)}")
+    out: dict[str, Any] = {**spec, "type": kind}
+    for key in ("start", "end", "center", "position"):
+        if key in out:
+            out[key] = list(xyz(out[key]))
+    if kind == "polyline":
+        points = out["points"]
+        if isinstance(points, str) or not isinstance(points, list) or len(points) < 2:
+            raise ValueError("a polyline needs at least two points")
+        out["points"] = [list(xyz(p)) for p in points]
+        bulges = out.get("bulges")
+        if bulges is not None:
+            if not isinstance(bulges, list) or len(bulges) != len(points):
+                raise ValueError("give one bulge per point (or none)")
+            out["bulges"] = [_number(b, "a bulge") for b in bulges]
+        out["closed"] = bool(out.get("closed", False))
+    if "radius" in out and _number(out["radius"], "radius") <= 0:
+        raise ValueError("radius must be positive")
+    for key in ("start_angle", "end_angle", "rotation", "width"):
+        if key in out:
+            out[key] = _number(out[key], key)
+    if kind == "text":
+        if _number(out["height"], "height") <= 0:
+            raise ValueError("height must be positive")
+        out["justify"] = justification(out.get("justify", "left"), TEXT_JUSTIFY, "justify")
+    if kind == "mtext":
+        if out["width"] < 0:
+            raise ValueError("width must be zero or more")
+        out["height"] = _number(out.get("height", 0), "height")
+        out["attachment"] = justification(out.get("attachment", "top_left"), MTEXT_ATTACH, "attachment")
+    if kind in ("text", "mtext") and not isinstance(out["text"], str):
+        raise ValueError("text must be a string")
+    if "layer" in out and not isinstance(out["layer"], str):
+        raise ValueError("layer must be a layer name")
+    if "style" in out and not isinstance(out["style"], str):
+        raise ValueError("style must be a text style name")
+    return out
+
+
+def _add_batch_entity(change: Edit, space: Any, spec: dict, styles: dict[str, str]) -> Any:
+    """Create one checked entry in space and record it for rollback at once (before any property
+    is set); the layer is set by the caller. Returns the new entity."""
+    kind = spec["type"]
+    if kind == "line":
+        return change.add(space.AddLine(point(spec["start"]), point(spec["end"])))
+    if kind == "polyline":
+        pline = change.add(space.AddLightWeightPolyline(doubles(flat_xy(spec["points"]))))
+        for i, bulge in enumerate(spec.get("bulges") or []):
+            if bulge:
+                pline.SetBulge(i, bulge)
+        if spec["closed"]:
+            pline.Closed = True
+        return pline
+    if kind == "circle":
+        return change.add(space.AddCircle(point(spec["center"]), float(spec["radius"])))
+    if kind == "arc":
+        return change.add(space.AddArc(point(spec["center"]), float(spec["radius"]), rad(spec["start_angle"]),
+                                       rad(spec["end_angle"])))
+    style = styles.get(spec.get("style", "").strip().lower(), "")
+    if kind == "text":
+        ent = change.add(space.AddText(spec["text"], point(spec["position"]), float(spec["height"])))
+        if style:
+            ent.StyleName = style
+        if spec["justify"] != "left":
+            ent.Alignment = getattr(enums, TEXT_JUSTIFY[spec["justify"]])
+            ent.TextAlignmentPoint = point(spec["position"])  # after Alignment, as in finish_text
+        if spec.get("rotation"):
+            ent.Rotation = rad(spec["rotation"])
+        return ent
+    ent = change.add(space.AddMText(point(spec["position"]), float(spec["width"]), spec["text"]))
+    if style:
+        ent.StyleName = style
+    if spec["height"] > 0:
+        ent.Height = spec["height"]
+    if spec["attachment"] != "top_left":
+        ent.AttachmentPoint = getattr(enums, MTEXT_ATTACH[spec["attachment"]])
+        ent.InsertionPoint = point(spec["position"])
+    return ent
+
+
+@acad_tool(timeout=600)
+def create_entities(entities: list[dict], layer: str = "", layout: str = "", name: str = "") -> dict:
+    """Create many lines, polylines, circles, arcs, texts and mtexts in one call and one undo
+    step. Every entry is checked before AutoCAD is touched, and if AutoCAD refuses any of them
+    the whole batch is rolled back: all or nothing. Use it instead of hundreds of draw_* calls.
+
+    Args:
+        entities: up to 2000 objects, each with a "type" and that type's fields (same meaning
+            as in the single draw tools; unknown fields are refused):
+            {"type": "line", "start": [x, y], "end": [x, y]};
+            {"type": "polyline", "points": [[x, y], ...], "closed": false, "bulges": [b, ...]};
+            {"type": "circle", "center": [x, y], "radius": r};
+            {"type": "arc", "center": [x, y], "radius": r, "start_angle": deg, "end_angle": deg};
+            {"type": "text", "text": "...", "position": [x, y], "height": h, "rotation": deg,
+            "justify": "middle_center", "style": "..."};
+            {"type": "mtext", "text": "...", "position": [x, y], "width": w, "height": h,
+            "attachment": "top_left", "style": "..."}.
+            Any entry may give "layer" to override the batch layer.
+        layer: layer for entries without their own (default: current layer).
+        layout: a sheet's layout name to draw on its paper space (default: model space).
+        name: which open drawing (default: active).
+
+    Returns how many were created, their handles in the order given, a count per type and
+    the space used. Hatches, block inserts and drawing into a block definition are not offered.
+    """
+    if not isinstance(entities, list) or not entities:
+        raise AcadError("entities is a non-empty list of objects, each with a \"type\".")
+    if len(entities) > MAX_BATCH:
+        raise AcadError(f"At most {MAX_BATCH} entities per call; got {len(entities)}. Split the batch.")
+    checked = []
+    for i, spec in enumerate(entities):
+        try:
+            checked.append(check_batch_entity(spec))
+        except ValueError as err:
+            kind = spec.get("type", "?") if isinstance(spec, dict) else "?"
+            raise AcadError(f"entities[{i}] ({kind}): {err}. Nothing was drawn.") from None
+    doc = session.document(name)
+    for wanted in sorted({s.get("layer") or layer for s in checked} - {""}):
+        if find_layer(doc, wanted) is None:
+            raise AcadError(f"No layer named '{wanted}'. Create it with add_layer first. Nothing was drawn.")
+    styles = {s["style"].strip().lower(): text_style(doc, s["style"])
+              for s in checked if s.get("style", "").strip()}
+    space, where = drawing_space(doc, layout)
+    created: list[str] = []
+    counts: dict[str, int] = {}
+    with session.edit(doc) as change:
+        for i, spec in enumerate(checked):
+            try:
+                ent = _add_batch_entity(change, space, spec, styles)
+                if spec.get("layer") or layer:
+                    ent.Layer = spec.get("layer") or layer
+                if spec["type"] == "text" and spec["justify"] != "left":
+                    ent.Update()  # as add_text does after setting the alignment point
+            except pywintypes.com_error as err:
+                raise AcadError(f"entities[{i}] ({spec['type']}): AutoCAD refused it "
+                                f"({describe_com_error(err)}). The whole batch was rolled back; "
+                                "nothing was drawn.") from err
+            created.append(str(ent.Handle))
+            counts[spec["type"]] = counts.get(spec["type"], 0) + 1
+    return {"created": len(created), "handles": created, "counts": counts, **where}

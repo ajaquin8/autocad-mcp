@@ -2314,6 +2314,79 @@ def test_add_mtext_attachment_and_style(fake_app, text_enums):
         draw.add_mtext("A", [0, 0], 1, attachment="middle")
 
 
+# ---------- create_entities (GAP-018) ----------
+
+
+BATCH = [
+    {"type": "line", "start": [0, 0], "end": [10, 0]},
+    {"type": "polyline", "points": [[0, 0], [5, 0], [5, 5]], "closed": True, "bulges": [0, 0.5, 0]},
+    {"type": "circle", "center": [2, 2], "radius": 1, "layer": "A-DOOR"},
+    {"type": "arc", "center": [0, 0], "radius": 3, "start_angle": 0, "end_angle": 90},
+    {"type": "text", "text": "BATH", "position": [5, 5], "height": 0.125, "justify": "MC", "style": "notes-text"},
+    {"type": "mtext", "text": r"A\PB", "position": [1, 1], "width": 4, "attachment": "middle_center"},
+]
+
+
+def test_create_entities_draws_a_mixed_batch_as_one_undo_step(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    layers.add_layer("A-WALL")
+    layers.add_layer("A-DOOR")
+    fake_app.doc.undo_log.clear()
+    out = draw.create_entities(BATCH, layer="A-WALL")
+    items = fake_app.doc.ModelSpace.items
+    assert out["created"] == 6 and out["handles"] == [e.Handle for e in items] and out["space"] == "model"
+    assert out["counts"] == {"line": 1, "polyline": 1, "circle": 1, "arc": 1, "text": 1, "mtext": 1}
+    assert fake_app.doc.undo_log == ["start", "end"]
+    line, pline, circle, arc, text, mtext = items
+    assert [e.Layer for e in items] == ["A-WALL", "A-WALL", "A-DOOR", "A-WALL", "A-WALL", "A-WALL"]
+    assert pline.Coordinates == (0.0, 0.0, 5.0, 0.0, 5.0, 5.0) and pline.Closed and pline.bulges == {1: 0.5}
+    assert arc.EndAngle == pytest.approx(math.pi / 2)
+    assert text.StyleName == "NOTES-TEXT" and text.Alignment == 10 and text.TextAlignmentPoint == (5.0, 5.0, 0.0)
+    assert mtext.AttachmentPoint == 5 and mtext.InsertionPoint == (1.0, 1.0, 0.0)
+
+
+def test_create_entities_checks_every_entry_before_touching_autocad(fake_app, text_enums):
+    session.mark_owned(fake_app.doc)
+    bad = [
+        ([{"type": "line", "start": [0, 0]}], r"entities\[0\] \(line\): missing end"),
+        ([BATCH[0], {"type": "circle", "center": [0, 0], "raduis": 1}], r"entities\[1\].*unknown field\(s\) raduis"),
+        ([{"type": "circle", "center": [0, 0], "radius": -1}], "radius must be positive"),
+        ([{"type": "hatch"}], "type is one of line, polyline"),
+        ([{"type": "polyline", "points": [[0, 0], [1, 1]], "bulges": [1]}], "one bulge per point"),
+        ([{"type": "text", "text": "X", "position": [0, 0], "height": 1, "justify": "fit"}], "justify is one of"),
+        ([{"type": "line", "start": [0, 0], "end": [1, 1], "layer": "NOPE"}], "No layer named 'NOPE'"),
+        ([{"type": "text", "text": "X", "position": [0, 0], "height": 1, "style": "ROMANS"}], "No text style"),
+        ([], "non-empty list"),
+        ([BATCH[0]] * (draw.MAX_BATCH + 1), "At most 2000"),
+    ]
+    for batch, message in bad:
+        with pytest.raises(AcadError, match=message):
+            draw.create_entities(batch)
+    assert fake_app.doc.ModelSpace.Count == 0 and fake_app.doc.undo_log == []
+
+
+def test_create_entities_rolls_the_whole_batch_back_when_autocad_refuses_one(fake_app, monkeypatch):
+    session.mark_owned(fake_app.doc)
+
+    def refuse(center, radius):
+        raise pywintypes.com_error(-2147352567, "Exception occurred.", (0, "AutoCAD", "eInvalidInput", None, 0, 0),
+                                   None)
+    monkeypatch.setattr(fake_app.doc.space, "AddCircle", refuse)
+    batch = [BATCH[0], BATCH[0], {"type": "circle", "center": [0, 0], "radius": 1}, BATCH[0]]
+    with pytest.raises(AcadError, match=r"entities\[2\] \(circle\): AutoCAD refused it.*rolled back"):
+        draw.create_entities(batch)
+    assert fake_app.doc.ModelSpace.items == [] and fake_app.doc.undo_log == ["start", "end"]
+
+
+def test_create_entities_respects_the_edit_guard_and_draws_on_a_sheet(fake_app):
+    with pytest.raises(AcadError, match="locked"):
+        draw.create_entities([BATCH[0]])
+    assert fake_app.doc.ModelSpace.Count == 0
+    session.mark_owned(fake_app.doc)
+    out = draw.create_entities([BATCH[0]], layout="Sheet1")
+    assert out["space"] == "paper" and out["layout"] == "Sheet1" and fake_app.doc.paper.Count == 1
+
+
 def test_attribute_definition_can_be_centred_in_a_style(fake_app, text_enums):
     session.mark_owned(fake_app.doc)
     info = blocks.add_attribute_definition("MARK", [2, 3], 0.1, justify="middle_center", style="NOTES-TEXT")

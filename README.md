@@ -69,7 +69,7 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-66 tools: drawings, layers, text/dimension/multileader styles, lines/polylines/arcs/circles/text, centre marks, linear and radial
+67 tools: drawings, layers, text/dimension/multileader styles, lines/polylines/arcs/circles/text (one at a time or up to 2000 in one call with `create_entities`), centre marks, linear and radial
 dimensions, leaders, blocks, attribute definitions and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, replacing the words of a text in place (`set_text`), prompt-driven commands (`run_command`), Block Editor authoring (linear parameters, stretch actions, a self-test), sheets (layouts, page setup,
 viewports at an exact scale, title blocks), queries, view capture, PDF plotting and clearing a stuck prompt. The full list is
 generated from the code into
