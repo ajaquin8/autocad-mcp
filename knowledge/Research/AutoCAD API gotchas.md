@@ -224,3 +224,8 @@ Refines the 2026-11-06 note that `LASTPROMPT` "lags one input". Read again from 
 ## 2026-11-23: "no active modelspace viewport" on a fresh sheet (GAP-014)
 - **user-reported (night run 2026-11-22):** `MSpace = True` right after `AddPViewport` and `Display(True)` failed with 0x8021005E "There is no active modelspace viewport. Switching to paperspace" on a new layout whose only viewport was the overall paper viewport. Making the layout current with `-LAYOUT S` did not help. `MVIEW` with the same corners, then `MSPACE`, worked.
 - **inferred:** AutoCAD only enters model space through a viewport that is on and inside the current paper view; a layout that was never shown may also not be set up until it is regenerated (see the 2026-11-09/10 note on automatic viewports). `add_viewport` now zooms the paper view onto the new viewport, regenerates and retries once. **unresolved until a live run:** whether that is the whole cause.
+
+## 2026-11-26: MTEXT and multileader background masks (GAP-020 a)
+- **verified (AutoCAD ActiveX reference, "BackgroundFill Property" and "TextBackgroundFill Property"):** `MText.BackgroundFill` and `MLeader.TextBackgroundFill` are read/write Booleans; `BackgroundFill` is the Background Mask property in the Properties palette.
+- **user-reported (Autodesk support article on border offset):** the default border offset factor is 1.5. ActiveX exposes no mask colour or offset property, so those need entmod on DXF codes 90/63/45/441 (not done).
+- **unresolved until a live run:** which fill AutoCAD uses when the mask is turned on through ActiveX (expected: "use drawing background colour"), and whether that plots white.

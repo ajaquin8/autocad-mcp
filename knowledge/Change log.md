@@ -378,3 +378,10 @@ Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log back
 - **user-reported (2026-11-23 audit):** a tool call that timed out or that the client cancelled stayed queued on the COM worker and ran later.
 - **Fix:** `com.py` `ComWorker.submit`/`wait` with a per-call deadline; queued calls past their deadline, timed out or cancelled by the client are dropped unrun; while a started call that timed out is still running, new calls fail at once (`AcadStuck`). `app.py` cancels the queued call when the MCP client cancels. Details: [[Decisions/Edit guard and document safety]] (2026-11-25). README safety list updated.
 - Tests: 4 new offline tests; the five checks pass. **Not live-verified** against AutoCAD.
+
+## 2026-11-26: background masks on MTEXT and multileaders (GAP-020, slice a)
+Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log backlog. Branch `gap/GAP-020-text-mask`.
+- **user-reported (2026-11-23 audit, kit #27; improvement list T4):** notes over hatched areas could not be masked through the server.
+- **Fix:** `add_mtext(mask=True)` sets `BackgroundFill`, `add_leader(mask=True)` sets `TextBackgroundFill`; new tool `set_text_mask(entity_handles, enabled, name)` turns masks on or off on existing MTEXT and multileaders (all handles checked first, one undo step, rollback). `get_entity` reports `mask` for MTEXT and multileaders. README tool list (67 tools), server instructions and [[Projects/AutoCAD-MCP/Tool reference]] updated. See [[Research/AutoCAD API gotchas]] (2026-11-26).
+- Not in this slice: mask colour and border offset (DXF 90/63/45/441 via entmod), TEXT (it has no mask), masks inside block definitions / draw order, `add_hatch` (slice b).
+- Tests: 3 new offline tests (178 in the suite); the five checks pass. **Not live-verified** against AutoCAD.
