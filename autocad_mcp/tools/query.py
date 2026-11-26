@@ -96,7 +96,8 @@ def query_entities(object_type: str = "", layer: str = "", limit: int = 100, off
 @acad_tool(read_only=True)
 def get_entity(handle: str, name: str = "") -> dict:
     """Full details of one entity: coordinates, sizes, text, block attributes or
-    dimension measurement, depending on its type.
+    dimension measurement, depending on its type. A property AutoCAD refuses to read is left out
+    and listed under "unreadable" with AutoCAD's error, instead of failing the whole call.
 
     Args:
         handle: the entity's handle.
