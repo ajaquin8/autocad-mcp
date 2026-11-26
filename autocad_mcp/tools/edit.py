@@ -115,6 +115,43 @@ def set_text(entity_handle: str, text: str, name: str = "") -> dict:
         return info
 
 
+MASK_PROPERTY = {"AcDbMText": "BackgroundFill", "AcDbMLeader": "TextBackgroundFill"}
+
+
+@acad_tool()
+def set_text_mask(entity_handles: str | list[str], enabled: bool = True, name: str = "") -> dict:
+    """Turn the background mask of existing MTEXT and multileaders on or off, so notes stay legible
+    over hatches and lines. AutoCAD's default mask is used (drawing background colour, border offset
+    1.5); colour and offset are not set here. All handles are checked first; one undo step.
+    Single-line TEXT has no mask: re-create it as MTEXT with add_mtext(mask=True).
+
+    Args:
+        entity_handles: handles of MTEXT or multileaders, as a list or "1A, 2B".
+        enabled: True (default) to mask, False to remove the mask.
+        name: which open drawing (default: active).
+    """
+    doc = session.document(name)
+    with session.edit(doc) as change:
+        targets = _targets(doc, entity_handles)
+        for ent in targets:
+            kind = str(ent.ObjectName)
+            if kind not in MASK_PROPERTY:
+                raise AcadError(f"Handle {ent.Handle} is {kind}; set_text_mask changes MTEXT and multileaders only "
+                                f"(TEXT has no mask: re-create it with add_mtext(mask=True)).")
+        changed = 0
+        for ent in targets:
+            prop = MASK_PROPERTY[str(ent.ObjectName)]
+            old = bool(getattr(ent, prop))
+            if old == bool(enabled):
+                continue
+            setattr(ent, prop, bool(enabled))
+            change.on_rollback(lambda e=ent, p=prop, v=old: setattr(e, p, v))
+            ent.Update()
+            changed += 1
+        return {"mask": bool(enabled), "changed": changed, "unchanged": len(targets) - changed,
+                "handles": [str(ent.Handle) for ent in targets]}
+
+
 @acad_tool(destructive=True)
 def delete_entities(entity_handles: str | list[str], name: str = "") -> str:
     """Delete entities. All handles are checked before anything is deleted; the user

@@ -159,12 +159,14 @@ class FakeSpace:
 
     def AddMText(self, insertion, width, text):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbMText", TextString=text, InsertionPoint=_xyz(insertion),
-                                    Width=width, Height=0.2, StyleName="Standard", AttachmentPoint=1))
+                                    Width=width, Height=0.2, StyleName="Standard", AttachmentPoint=1,
+                                    BackgroundFill=False))
 
     def AddMLeader(self, points, index):  # noqa: N802
         flat = list(_xyz(points))
         triples = [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
-        return self._add(FakeEntity(self.doc, "AcDbMLeader", points=triples, TextString="")), index
+        return self._add(FakeEntity(self.doc, "AcDbMLeader", points=triples, TextString="",
+                                    TextBackgroundFill=False)), index
 
     def AddDimDiametric(self, chord, far_chord, leader_length):  # noqa: N802
         return self._add(FakeEntity(self.doc, "AcDbDiametricDimension", chord=_xyz(chord), far=_xyz(far_chord),

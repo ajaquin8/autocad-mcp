@@ -72,8 +72,8 @@ Details: [knowledge/Decisions/Edit guard and document safety.md](knowledge/Decis
 
 ## Tools
 
-66 tools: drawings, layers, text/dimension/multileader styles, lines/polylines/arcs/circles/text, centre marks, linear and radial
-dimensions, leaders, blocks, attribute definitions and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, replacing the words of a text in place (`set_text`), prompt-driven commands (`run_command`), Block Editor authoring (linear parameters, stretch actions, a self-test), sheets (layouts, page setup,
+67 tools: drawings, layers, text/dimension/multileader styles, lines/polylines/arcs/circles/text, centre marks, linear and radial
+dimensions, leaders, blocks, attribute definitions and attributes (including dynamic block properties and measuring what a block shows), moving/re-layering/deleting by handle, replacing the words of a text in place (`set_text`), background masks on MTEXT and multileaders (`set_text_mask`, `mask=` on add_mtext and add_leader), prompt-driven commands (`run_command`), Block Editor authoring (linear parameters, stretch actions, a self-test), sheets (layouts, page setup,
 viewports at an exact scale, title blocks), queries, view capture, PDF plotting and clearing a stuck prompt. The full list is
 generated from the code into
 [knowledge/Projects/AutoCAD-MCP/Tool reference.md](knowledge/Projects/AutoCAD-MCP/Tool%20reference.md).
