@@ -34,7 +34,7 @@ Typical workflow: acad_status -> new_drawing -> add_layer -> draw_* / add_text /
 add_dimension / insert_block -> capture_view to check the result visually ->
 save_document. Each drawing tool is one undo step and is rolled back
 automatically if it fails. Results report entity handles; use them with
-get_entity, move_entities, change_properties, set_text and delete_entities.
+get_entity, move_entities, change_properties, set_text, set_text_mask and delete_entities.
 run_command, the Block Editor tools, zoom_extents and capture_view work in the active
 drawing only; activate_document switches to another open drawing (only while the user
 is not working in AutoCAD).

@@ -289,7 +289,8 @@ def add_text(text: str, position: Point, height: float, rotation: float = 0, lay
 
 @acad_tool()
 def add_mtext(text: str, position: Point, width: float, height: float = 0, layer: str = "",
-              attachment: str = "top_left", style: str = "", layout: str = "", name: str = "") -> dict:
+              attachment: str = "top_left", style: str = "", mask: bool = False, layout: str = "",
+              name: str = "") -> dict:
     """Add multiline text (MTEXT). position is its attachment point: the top-left corner by
     default, the centre with attachment="middle_center".
 
@@ -302,6 +303,9 @@ def add_mtext(text: str, position: Point, width: float, height: float = 0, layer
         attachment: top_left (default), top_center, top_right, middle_left, middle_center,
             middle_right, bottom_left, bottom_center or bottom_right (or TL, MC, BR ...).
         style: text style to use (default: the current one).
+        mask: True to give the text a background mask, so it stays legible over hatches and
+            lines (AutoCAD's default mask: drawing background colour, border offset 1.5).
+            set_text_mask turns it on or off later.
         layout: a sheet's layout name to draw on its paper space (default: model space).
         name: which open drawing (default: active).
     """
@@ -318,6 +322,8 @@ def add_mtext(text: str, position: Point, width: float, height: float = 0, layer
         if key != "top_left":
             ent.AttachmentPoint = getattr(enums, MTEXT_ATTACH[key])
             ent.InsertionPoint = point(position)  # the attachment point stays at position
+        if mask:
+            ent.BackgroundFill = True
         info = place(change, ent, layer, where)
         info["attachment"] = key
         return info

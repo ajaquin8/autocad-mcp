@@ -439,6 +439,59 @@ def test_set_text_refuses_other_objects_empty_text_and_locked_drawings(fake_app)
     assert fake_app.doc.HandleToObject(text).TextString == "OLD"
 
 
+class _MaskRefused(FakeEntity):
+    """An MTEXT whose mask AutoCAD refuses to change."""
+
+    @property
+    def BackgroundFill(self):  # noqa: N802 - mirrors the COM API
+        return False
+
+    @BackgroundFill.setter
+    def BackgroundFill(self, value):  # noqa: N802
+        from conftest import _com_error
+        raise _com_error("Invalid input")
+
+
+def test_add_mtext_and_add_leader_can_mask_their_text(fake_app):
+    session.mark_owned(fake_app.doc)
+    note = draw.add_mtext("SEE DETAIL 3", [0, 0], 10, mask=True)
+    assert note["mask"] is True and fake_app.doc.HandleToObject(note["handle"]).BackgroundFill is True
+    assert draw.add_mtext("PLAIN", [0, 5], 10)["mask"] is False
+    leader = annotate.add_leader([[0, 0], [2, 2]], "TYP.", mask=True)
+    assert leader["mask"] is True and fake_app.doc.HandleToObject(leader["handle"]).TextBackgroundFill is True
+    assert annotate.add_leader([[0, 0], [2, 2]], "TYP.")["mask"] is False
+
+
+def test_set_text_mask_turns_masks_on_and_off_in_one_undo_step(fake_app):
+    session.mark_owned(fake_app.doc)
+    a = draw.add_mtext("A", [0, 0], 10)["handle"]
+    b = draw.add_mtext("B", [0, 5], 10, mask=True)["handle"]
+    c = annotate.add_leader([[0, 0], [2, 2]], "C")["handle"]
+    fake_app.doc.undo_log.clear()
+    out = edit.set_text_mask(f"{a.lower()}, {b}; {c}")
+    assert out == {"mask": True, "changed": 2, "unchanged": 1, "handles": [a, b, c]}
+    assert fake_app.doc.HandleToObject(a).BackgroundFill and fake_app.doc.HandleToObject(c).TextBackgroundFill
+    assert fake_app.doc.undo_log == ["start", "end"]
+    off = edit.set_text_mask([a, c], enabled=False)
+    assert off["changed"] == 2 and not fake_app.doc.HandleToObject(a).BackgroundFill
+    assert fake_app.doc.HandleToObject(b).BackgroundFill  # not named, left masked
+
+
+def test_set_text_mask_checks_every_handle_first_and_rolls_back(fake_app):
+    note = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbMText", BackgroundFill=False)).Handle
+    text = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbText", TextString="T")).Handle
+    with pytest.raises(AcadError, match="is locked"):
+        edit.set_text_mask(note)
+    session.mark_owned(fake_app.doc)
+    with pytest.raises(AcadError, match="is AcDbText; set_text_mask changes MTEXT and multileaders only"):
+        edit.set_text_mask([note, text])
+    assert fake_app.doc.HandleToObject(note).BackgroundFill is False  # nothing changed before the refusal
+    refused = fake_app.doc.space._add(_MaskRefused(fake_app.doc, "AcDbMText")).Handle
+    with pytest.raises(pywintypes.com_error):
+        edit.set_text_mask([note, refused])  # the first is masked, then the second fails
+    assert fake_app.doc.HandleToObject(note).BackgroundFill is False  # rolled back
+
+
 def test_unknown_handle_is_reported(fake_app):
     session.mark_owned(fake_app.doc)
     with pytest.raises(AcadError, match="No object with handle"):

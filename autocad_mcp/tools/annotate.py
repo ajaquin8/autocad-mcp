@@ -87,7 +87,8 @@ def add_radial_dimension(center: Point, point_on_curve: Point, kind: str = "diam
 
 
 @acad_tool()
-def add_leader(points: list[Point], text: str, layer: str = "", layout: str = "", name: str = "") -> dict:
+def add_leader(points: list[Point], text: str, layer: str = "", mask: bool = False, layout: str = "",
+               name: str = "") -> dict:
     """Add a multileader (a callout): an arrow at the first point, a line through the next, and text
     at the last, using the current multileader style. Good for notes such as "1/4" DIA THRU, 4 PLACES".
 
@@ -95,6 +96,7 @@ def add_leader(points: list[Point], text: str, layer: str = "", layout: str = ""
         points: two or three points [[x, y], ...]: the arrow tip first, the text end last.
         text: the note; use \\P for a new line.
         layer: layer to put it on (default: current layer).
+        mask: True to give the note a background mask, so it stays legible over hatches and lines.
         layout: a sheet's layout name to put it on its paper space (default: model space).
         name: which open drawing (default: active).
     """
@@ -110,4 +112,6 @@ def add_leader(points: list[Point], text: str, layer: str = "", layout: str = ""
         leader = result[0] if isinstance(result, tuple) else result  # late binding may also return the index
         change.add(leader)
         leader.TextString = text
+        if mask:
+            leader.TextBackgroundFill = True
         return place(change, leader, layer, where)

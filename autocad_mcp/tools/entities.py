@@ -81,9 +81,9 @@ def details(ent: Any) -> dict:
                     rotation=round(deg(ent.Rotation), 6), style=str(ent.StyleName))
     elif kind == "AcDbMText":
         info.update(text=str(ent.TextString), position=rounded(ent.InsertionPoint), width=ent.Width,
-                    height=ent.Height, style=str(ent.StyleName))
+                    height=ent.Height, style=str(ent.StyleName), mask=bool(ent.BackgroundFill))
     elif kind == "AcDbMLeader":
-        info["text"] = str(ent.TextString)
+        info.update(text=str(ent.TextString), mask=bool(ent.TextBackgroundFill))
     elif kind == "AcDbViewport":
         info.update(center=rounded(ent.Center), width=round(ent.Width, 6), height=round(ent.Height, 6),
                     scale=round(ent.CustomScale, 9), locked=bool(ent.DisplayLocked))
