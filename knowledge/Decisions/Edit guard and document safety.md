@@ -94,3 +94,10 @@ Status: **built; not live-verified against AutoCAD** (gd-coder, Hermes morning M
   - `warning`: one sentence when any of the above is off; the tool description tells the model to pass it on to the user.
 - **Errors:** busy, timed-out and lost-connection errors now also name a crash window ("AutoCAD has probably crashed ... Do not retry").
 - **Not in this slice:** the cross-process lock (slice a, PR #35, section above) and cancelling queued calls (slice b).
+
+## 2026-11-25: timed-out and cancelled calls no longer run late (GAP-017, slice b)
+Status: **built; not live-verified** (gd-coder, Hermes morning MCP-fix lane, from the NightDraft gap log backlog).
+- **Why (user-reported 2026-11-23 audit):** `@acad_tool` waited with `abandon_on_cancel=True` and `ComWorker.call` only stopped waiting on timeout. The call stayed in the worker queue and ran later, maybe minutes after the client had given up, holding the cross-process lock from slice a while it did.
+- **Dropped before they start:** every queued call carries a deadline (submit time + the tool's timeout). The worker never starts one whose deadline has passed, and caps its wait for the cross-process lock at the time left. On timeout, and when the MCP client cancels the tool call, the future is cancelled; if AutoCAD had not started it, the error says "dropped. Nothing was sent to AutoCAD". **verified offline** (unit tests with a blocked worker).
+- **Fail fast behind a stuck call:** a call that had already started cannot be interrupted through COM. It is remembered as stuck, and until it finishes every new call fails at once (`AcadStuck`, a kind of timeout, so the error also names any AutoCAD dialog or crash window) instead of waiting out another full timeout in the queue. The message names the stuck tool and how long it has run, and says not to repeat it.
+- **Not changed:** the timeouts themselves (180 s default per tool), `cancel_command` (still outside the worker), and anything about what AutoCAD does with a call it has started.

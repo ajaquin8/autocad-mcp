@@ -372,3 +372,9 @@ Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log back
 - **user-reported (2026-11-23 audit):** acad_status missed crash-report windows owned by other processes, and nothing reported competing autocad-mcp servers.
 - **Fix:** `acad_status` has a new `health` block (not responding, crash windows of any process, active-drawing layout probe, other autocad-mcp servers, a `warning`). Busy, timeout and lost-connection errors also name a crash window. New helpers in `winui.py` (`crash_dialogs`, `describe_crash`, `is_hung`, `process_image`). Details: [[Decisions/Edit guard and document safety]] (2026-11-24). README safety list updated.
 - Tests: 4 new offline tests (165 in the whole suite; 171 after merging slice a from `main`); the five checks pass. The WMI process list and the crash-window scan were also run on the real desktop with a scratch script, without AutoCAD calls. **Not live-verified** through acad_status against AutoCAD.
+
+## 2026-11-25: timed-out and cancelled calls no longer run late (GAP-017, slice b)
+Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log backlog. Branch `gap/GAP-017-cancel-deadlines`.
+- **user-reported (2026-11-23 audit):** a tool call that timed out or that the client cancelled stayed queued on the COM worker and ran later.
+- **Fix:** `com.py` `ComWorker.submit`/`wait` with a per-call deadline; queued calls past their deadline, timed out or cancelled by the client are dropped unrun; while a started call that timed out is still running, new calls fail at once (`AcadStuck`). `app.py` cancels the queued call when the MCP client cancels. Details: [[Decisions/Edit guard and document safety]] (2026-11-25). README safety list updated.
+- Tests: 4 new offline tests; the five checks pass. **Not live-verified** against AutoCAD.

@@ -49,6 +49,9 @@ Build the Claude desktop bundle with `python scripts/build_mcpb.py` (writes `dis
   call waits up to 30 seconds for the other server (`AUTOCAD_MCP_LOCK_WAIT_SECONDS`) and then fails
   without touching AutoCAD, naming the process that holds it. `AUTOCAD_MCP_CROSS_PROCESS_LOCK=0`
   switches the lock off. Servers built before this change (including a 0.1.9 bundle) ignore the lock.
+- **No late runs after a timeout:** a call that AutoCAD had not started when it timed out, or when
+  the client cancelled it, is dropped and never runs later. A call that had started cannot be
+  stopped; until it ends, new calls fail at once with a message naming it, instead of queueing.
 - **Health in `acad_status`:** a `health` block says whether Windows reports AutoCAD as not
   responding, whether a crash report or fatal-error window is open (any process, including the
   Autodesk crash reporter), whether the active drawing's layouts answer, and which other
