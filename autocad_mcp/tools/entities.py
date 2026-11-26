@@ -7,7 +7,7 @@ from typing import Any
 
 import pywintypes
 
-from ..com import AcadError, deg, rounded
+from ..com import RPC_BUSY_CODES, RPC_GONE_CODES, AcadError, deg, describe_com_error, rounded
 
 BYLAYER = 256
 
@@ -93,8 +93,23 @@ def details(ent: Any) -> dict:
                     scale=rounded([ent.XScaleFactor, ent.YScaleFactor, ent.ZScaleFactor]),
                     attributes=attributes(ent))
     elif "Dimension" in kind:
-        info.update(measurement=round(ent.Measurement, 6), text_override=str(ent.TextOverride))
+        # AutoCAD can refuse these reads with "Object is not open for write" (0x8020002B), seen on a
+        # rotated dimension in a drawing that was not the active document (GAP-025). Read each one on
+        # its own and report what could not be read instead of failing the whole call.
+        _read(info, "measurement", lambda: round(ent.Measurement, 6))
+        _read(info, "text_override", lambda: str(ent.TextOverride))
     return info
+
+
+def _read(info: dict, key: str, getter: Any) -> None:
+    """info[key] = getter(), or note the key under info['unreadable'] when AutoCAD refuses the read.
+    Busy and lost-connection errors still raise, so the caller sees them as usual."""
+    try:
+        info[key] = getter()
+    except pywintypes.com_error as err:
+        if err.args and err.args[0] in RPC_BUSY_CODES | RPC_GONE_CODES:
+            raise
+        info.setdefault("unreadable", {})[key] = describe_com_error(err)
 
 
 def find_layout(doc: Any, name: str) -> Any:

@@ -2804,3 +2804,36 @@ def test_other_servers_leaves_out_this_server_and_counts_launchers_once(monkeypa
         raise OSError("WMI unavailable")
     monkeypatch.setattr(docs_module.win32com.client, "GetObject", no_wmi)
     assert docs_module._other_servers() == []
+
+
+class _DimRefusingReads(FakeEntity):
+    """A dimension whose Measurement read fails as AutoCAD did in GAP-025."""
+
+    @property
+    def Measurement(self):  # noqa: N802 - mirrors the COM API
+        from conftest import _com_error
+        raise _com_error("Object is not open for write (0x8020002B)")
+
+
+def test_get_entity_on_a_dimension_returns_what_it_can_read(fake_app):
+    ok = fake_app.doc.space._add(FakeEntity(fake_app.doc, "AcDbRotatedDimension", Measurement=12.5,
+                                            TextOverride="<> TYP", StyleName="ARCH-DIM"))
+    info = query.get_entity(ok.Handle)
+    assert (info["measurement"], info["text_override"]) == (12.5, "<> TYP")
+    assert "unreadable" not in info
+
+    bad = fake_app.doc.space._add(_DimRefusingReads(fake_app.doc, "AcDbRotatedDimension", TextOverride="",
+                                                    StyleName="Standard"))
+    info = query.get_entity(bad.Handle)
+    assert info["handle"] == bad.Handle and info["text_override"] == ""
+    assert "measurement" not in info and "not open for write" in info["unreadable"]["measurement"]
+
+
+def test_get_entity_on_a_dimension_still_raises_when_autocad_is_busy(fake_app):
+    class Busy(FakeEntity):
+        @property
+        def Measurement(self):  # noqa: N802
+            raise pywintypes.com_error(next(iter(com.RPC_BUSY_CODES)), "Call was rejected by callee.", None, None)
+    dim = fake_app.doc.space._add(Busy(fake_app.doc, "AcDbAlignedDimension", TextOverride="", StyleName="S"))
+    with pytest.raises(pywintypes.com_error):  # re-raised, so the worker reports it as "busy"
+        query.get_entity(dim.Handle)

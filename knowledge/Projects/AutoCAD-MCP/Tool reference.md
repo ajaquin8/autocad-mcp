@@ -20,7 +20,7 @@ See [[Projects/AutoCAD-MCP/index]] for status and [[Research/AutoCAD API gotchas
 
 - **`drawing_info`** (read-only): Summarize a drawing: units, extents, layer and layout counts, and model space entity counts by type and by layer. Parameters: `name`.
 - **`query_entities`** (read-only): Find entities by type and/or layer, in model space or on one layout (paper space, where title blocks and viewports live). Returns handle, type, layer and bounding box; use get_entity for full details. Parameters: `object_type`, `layer`, `limit`, `offset`, `layout`, `name`.
-- **`get_entity`** (read-only): Full details of one entity: coordinates, sizes, text, block attributes or dimension measurement, depending on its type. Parameters: `handle`, `name`.
+- **`get_entity`** (read-only): Full details of one entity: coordinates, sizes, text, block attributes or dimension measurement, depending on its type. A property AutoCAD refuses to read is left out and listed under "unreadable" with AutoCAD's error, instead of failing the whole call. Parameters: `handle`, `name`.
 - **`zoom_extents`**: Zoom the active view to show the whole drawing. Changes the user's view, not the drawing. Parameters: `name`.
 - **`capture_view`** (read-only): Screenshot the AutoCAD window so you can SEE the drawing. Use after drawing steps (zoom_extents first if the new geometry may be off screen). Parameters: `max_width`.
 
