@@ -378,3 +378,9 @@ Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log back
 - **user-reported (2026-11-23 audit):** a tool call that timed out or that the client cancelled stayed queued on the COM worker and ran later.
 - **Fix:** `com.py` `ComWorker.submit`/`wait` with a per-call deadline; queued calls past their deadline, timed out or cancelled by the client are dropped unrun; while a started call that timed out is still running, new calls fail at once (`AcadStuck`). `app.py` cancels the queued call when the MCP client cancels. Details: [[Decisions/Edit guard and document safety]] (2026-11-25). README safety list updated.
 - Tests: 4 new offline tests; the five checks pass. **Not live-verified** against AutoCAD.
+
+## 2026-11-26: get_entity no longer fails on dimensions AutoCAD will not read (GAP-025)
+Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log. Branch `gap/GAP-025-get-entity-dimension`.
+- **user-reported (night run 2026-11-25):** `get_entity` on a rotated dimension in a drawing that was not the active document failed with "Object is not open for write (0x8020002B)" while reading `Measurement`, so nothing came back.
+- **Fix:** `tools/entities.py` `details()` reads a dimension's `measurement` and `text_override` one at a time; a read AutoCAD refuses is left out and listed under `unreadable` with the error. Busy and lost-connection errors still raise. `get_entity` docstring and [[Projects/AutoCAD-MCP/Tool reference]] updated. See [[Research/AutoCAD API gotchas]] (2026-11-26).
+- Tests: 2 new offline tests (177 in the suite); the five checks pass. **Not live-verified** against AutoCAD.
