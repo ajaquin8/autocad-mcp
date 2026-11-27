@@ -2804,3 +2804,115 @@ def test_other_servers_leaves_out_this_server_and_counts_launchers_once(monkeypa
         raise OSError("WMI unavailable")
     monkeypatch.setattr(docs_module.win32com.client, "GetObject", no_wmi)
     assert docs_module._other_servers() == []
+
+
+# ---------- add_hatch (GAP-020 b) ----------
+
+
+class FakeHatch(FakeEntity):
+    def __init__(self, doc, pattern_type, pattern, associative) -> None:
+        super().__init__(doc, "AcDbHatch", PatternType=pattern_type, PatternName=pattern,
+                         AssociativeHatch=associative, PatternScale=1.0, PatternAngle=0.0, outer=None, inner=[],
+                         evaluated=False)
+
+    def __setattr__(self, name, value) -> None:
+        # AutoCAD help: nothing but AppendOuterLoop on a new hatch, or AutoCAD becomes unpredictable.
+        assert name.startswith("_") or self.__dict__.get("outer", "unset") is not None, \
+            f"{name} set before AppendOuterLoop"
+        super().__setattr__(name, value)
+
+    def AppendOuterLoop(self, loop):  # noqa: N802
+        assert self.outer is None, "AutoCAD takes one outer loop, first"
+        self.__dict__["outer"] = list(loop.value)
+
+    def AppendInnerLoop(self, loop):  # noqa: N802
+        assert self.outer is not None, "inner loops come after the outer loop"
+        self.inner.append(list(loop.value))
+
+    def Evaluate(self):  # noqa: N802
+        if self._doc.fail_evaluate:
+            raise pywintypes.com_error(-2147352567, "Exception occurred.",
+                                       (0, "AutoCAD", "Invalid input", None, 0, 0), None)
+        self.evaluated = True
+
+    @property
+    def Area(self):  # noqa: N802
+        def area(pl):
+            flat = pl.coords
+            xs, ys = flat[0::2], flat[1::2]
+            return abs(sum(xs[i] * ys[i - 1] - xs[i - 1] * ys[i] for i in range(len(xs)))) / 2
+        return area(self.outer[0]) - sum(area(loop[0]) for loop in self.inner)
+
+
+@pytest.fixture()
+def hatch_space(fake_app, monkeypatch):
+    from conftest import FakeSpace
+
+    def add_pline(space, coords):
+        return space._add(FakeEntity(space.doc, "AcDbPolyline", coords=list(coords.value), Closed=False))
+
+    def add_hatch(space, pattern_type, pattern, associative):
+        return space._add(FakeHatch(space.doc, pattern_type, pattern, associative))
+    monkeypatch.setattr(FakeSpace, "AddLightWeightPolyline", add_pline, raising=False)
+    monkeypatch.setattr(FakeSpace, "AddHatch", add_hatch, raising=False)
+    monkeypatch.setattr(com.enums, "_values", {**com.enums._values, "acHatchPatternTypePreDefined": 1})
+    fake_app.doc.fail_evaluate = False
+    session.mark_owned(fake_app.doc)
+    return fake_app.doc
+
+
+def test_add_hatch_with_a_hole_and_a_text_island_is_one_undo_step(hatch_space):
+    from autocad_mcp.tools import hatch
+    doc = hatch_space
+    doc.Layers.Add("A-HATCH")
+    note = doc.space.AddText("NOTE", (0, 0, 0), 0.1)  # fake bounding box (0, 0)-(1, 1)
+    doc.undo_log.clear()
+    out = hatch.add_hatch([[-5, -5], [5, -5], [5, 5], [-5, 5]], holes=[[[2, 2], [4, 2], [4, 4], [2, 4]]],
+                          pattern="ansi31", scale=2, angle=45, text_islands=note.Handle, island_margin=0.5,
+                          layer="A-HATCH")
+    ent = doc.HandleToObject(out["handle"])
+    assert ent.ObjectName == "AcDbHatch" and ent.evaluated and ent.Layer == "A-HATCH"
+    assert ent.PatternType == 1 and ent.PatternName == "ANSI31" and ent.AssociativeHatch is False
+    assert ent.PatternScale == 2.0 and ent.PatternAngle == pytest.approx(math.pi / 4)
+    assert len(ent.outer) == 1 and len(ent.inner) == 2  # the hole, then the text island
+    assert ent.inner[1][0].coords == [-0.5, -0.5, 1.5, -0.5, 1.5, 1.5, -0.5, 1.5]
+    assert out["loops"] == 3 and out["holes"] == 1 and out["text_islands"] == [note.Handle]
+    assert out["area"] == pytest.approx(100 - 4 - 4) and out["associative"] is False
+    assert out["island_boxes"] == [[[-0.5, -0.5], [1.5, 1.5]]]
+    # the temporary boundaries are gone; the note and the hatch stay
+    assert [e.ObjectName for e in doc.space.items] == ["AcDbText", "AcDbHatch"]
+    assert doc.undo_log == ["start", "end"]
+
+
+def test_add_hatch_solid_keeps_boundaries_when_asked_and_draws_on_a_sheet(hatch_space):
+    from autocad_mcp.tools import hatch
+    doc = hatch_space
+    out = hatch.add_hatch([[0, 0], [2, 0], [2, 1]], keep_boundaries=True, layout="Sheet1")
+    ent = doc.HandleToObject(out["handle"])
+    assert out["space"] == "paper" and out["layout"] == "Sheet1" and out["pattern"] == "SOLID"
+    assert ent.AssociativeHatch is True and "scale" not in out and ent.PatternScale == 1.0
+    assert len(out["boundary_handles"]) == 1 and out["associative"] is True
+    pline = doc.HandleToObject(out["boundary_handles"][0])
+    assert pline.Closed is True and ent.outer[0] is pline
+    assert [e.ObjectName for e in doc.paper.items] == ["AcDbPolyline", "AcDbHatch"] and doc.space.items == []
+
+
+def test_add_hatch_checks_input_first_and_rolls_back_when_autocad_refuses(hatch_space):
+    from autocad_mcp.tools import hatch
+    doc = hatch_space
+    square = [[0, 0], [1, 0], [1, 1], [0, 1]]
+    for kwargs, message in [({"outer": [[0, 0], [1, 1]]}, "at least three points"),
+                            ({"outer": [[0, 0], [1, 1], [2, 2]]}, "no area"),
+                            ({"outer": square, "holes": [[[0, 0], [1, 0]]]}, r"holes\[0\] needs"),
+                            ({"outer": square, "scale": 0}, "scale must be positive"),
+                            ({"outer": square, "pattern": "ANSI31, SOLID"}, "pattern is a pattern name"),
+                            ({"outer": square, "island_margin": -1}, "island_margin"),
+                            ({"outer": square, "layer": "NOPE"}, "No layer named 'NOPE'"),
+                            ({"outer": square, "text_islands": "FFFF"}, "No object with handle 'FFFF'")]:
+        with pytest.raises(AcadError, match=message):
+            hatch.add_hatch(**kwargs)
+    assert doc.space.items == [] and doc.undo_log == []
+    doc.fail_evaluate = True  # e.g. an island outside the boundary, or a pattern AutoCAD does not know
+    with pytest.raises(pywintypes.com_error):
+        hatch.add_hatch(square, holes=[[[5, 5], [6, 5], [6, 6]]])
+    assert doc.space.items == []  # hatch and both temporary boundaries rolled back
