@@ -21,6 +21,7 @@ from .tools import (  # noqa: F401
     query,
     settings,
     sheets,
+    tables,
 )
 
 if os.environ.get("AUTOCAD_MCP_ENABLE_COMMANDS", "").strip().lower() in ("1", "true", "yes", "on"):

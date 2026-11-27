@@ -2804,3 +2804,126 @@ def test_other_servers_leaves_out_this_server_and_counts_launchers_once(monkeypa
         raise OSError("WMI unavailable")
     monkeypatch.setattr(docs_module.win32com.client, "GetObject", no_wmi)
     assert docs_module._other_servers() == []
+
+
+# ---------- add_table (GAP-021) ----------
+
+
+class FakeTable(FakeEntity):
+    def __init__(self, doc, insertion, rows, columns, row_height, col_width) -> None:
+        super().__init__(doc, "AcDbTable", InsertionPoint=insertion, Rows=rows, Columns=columns,
+                         StyleName="Standard", RegenerateTableSuppressed=False, regens=0, widths=[col_width] * columns,
+                         row_height=row_height, cells={}, heights={}, merged={(0, 0, 0, columns - 1)})
+
+    def __setattr__(self, name, value) -> None:
+        if name == "StyleName" and value not in ("Standard", "SCHEDULE"):
+            raise _refused("eKeyNotFound")
+        if name == "RegenerateTableSuppressed" and value is False and "regens" in self.__dict__:
+            self.__dict__["regens"] += 1
+        super().__setattr__(name, value)
+
+    def _check(self, row, col):
+        assert 0 <= row < self.Rows and 0 <= col < self.Columns, (row, col)
+
+    def SetText(self, row, col, text):  # noqa: N802
+        self._check(row, col)
+        if text == "REFUSE":
+            raise _refused("eInvalidInput")
+        self.cells[row, col] = text
+
+    def SetCellTextHeight(self, row, col, height):  # noqa: N802
+        self._check(row, col)
+        self.heights[row, col] = height
+
+    def SetColumnWidth(self, col, width):  # noqa: N802
+        self._check(0, col)
+        self.widths[col] = width
+
+    def MergeCells(self, *span):  # noqa: N802
+        if span in self.merged:
+            raise _refused("eInvalidInput")
+        self.merged.add(span)
+
+    def UnmergeCells(self, *span):  # noqa: N802
+        if span not in self.merged:
+            raise _refused("eInvalidInput")
+        self.merged.remove(span)
+
+    @property
+    def Width(self):  # noqa: N802
+        return sum(self.widths)
+
+    @property
+    def Height(self):  # noqa: N802
+        return self.Rows * self.row_height
+
+
+@pytest.fixture()
+def table_space(fake_app, monkeypatch):
+    from conftest import FakeSpace
+
+    def add_table(space, insertion, rows, columns, row_height, col_width):
+        return space._add(FakeTable(space.doc, _xyz_of(insertion), rows, columns, row_height, col_width))
+    monkeypatch.setattr(FakeSpace, "AddTable", add_table, raising=False)
+    session.mark_owned(fake_app.doc)
+    return fake_app.doc
+
+
+def _refused(text: str):
+    return pywintypes.com_error(-2147352567, "Exception occurred.", (0, "AutoCAD", text, None, 0, 0), None)
+
+
+def test_add_table_with_title_header_and_column_widths_is_one_undo_step(table_space):
+    from autocad_mcp.tools import tables
+    doc = table_space
+    doc.Layers.Add("A-ANNO-SCHD")
+    doc.undo_log.clear()
+    out = tables.add_table([10, 20], [["MARK", "SIZE", "HARDWARE"], ["101", "3'-0\" x 7'-0\"", 4], ["102", None]],
+                           col_widths=[1, 3, 2], row_height=0.3, text_height=0.1, title="DOOR SCHEDULE",
+                           style="SCHEDULE", layer="A-ANNO-SCHD")
+    t = doc.HandleToObject(out["handle"])
+    assert t.ObjectName == "AcDbTable" and t.InsertionPoint == (10.0, 20.0, 0.0) and t.Layer == "A-ANNO-SCHD"
+    assert (t.Rows, t.Columns, t.StyleName, t.widths) == (4, 3, "SCHEDULE", [1.0, 3.0, 2.0])
+    assert t.cells[0, 0] == "DOOR SCHEDULE" and (0, 0, 0, 2) in t.merged
+    assert t.cells[1, 0] == "MARK" and t.cells[2, 1] == "3'-0\" x 7'-0\"" and t.cells[2, 2] == "4"
+    assert t.cells[3, 1] == "" and t.cells[3, 2] == ""  # None and the short row become empty cells
+    assert set(t.heights.values()) == {0.1} and len(t.heights) == 1 + 9
+    assert t.RegenerateTableSuppressed is False and t.regens == 1  # rebuilt once, after filling
+    assert out["rows"] == 4 and out["columns"] == 3 and out["header_row"] == 1 and out["title_merged"] is True
+    assert out["width"] == 6.0 and out["height"] == pytest.approx(1.2) and out["style"] == "SCHEDULE"
+    assert doc.undo_log == ["start", "end"]
+
+
+def test_add_table_without_title_unmerges_row_zero_and_goes_on_a_sheet(table_space):
+    from autocad_mcp.tools import tables
+    doc = table_space
+    out = tables.add_table([1, 8], [["SHEET", "TITLE"], ["A-101", "FLOOR PLAN"]], col_widths=2.5, layout="Sheet1")
+    t = doc.HandleToObject(out["handle"])
+    assert out["space"] == "paper" and out["layout"] == "Sheet1" and doc.paper.items == [t]
+    assert t.Rows == 2 and t.widths == [2.5, 2.5] and t.merged == set() and out["title_merged"] is False
+    assert t.cells == {(0, 0): "SHEET", (0, 1): "TITLE", (1, 0): "A-101", (1, 1): "FLOOR PLAN"}
+    assert out["header_row"] == 0 and out["title"] == ""
+    one = tables.add_table([0, 0], [["ONLY"]])
+    assert "title_merged" not in one and doc.HandleToObject(one["handle"]).cells == {(0, 0): "ONLY"}
+
+
+def test_add_table_checks_input_first_and_rolls_back_when_autocad_refuses(table_space):
+    from autocad_mcp.tools import tables
+    doc = table_space
+    for kwargs, message in [({"data": []}, "at least one row"),
+                            ({"data": ["A", "B"]}, "list of rows"),
+                            ({"data": [[]]}, "at least one cell"),
+                            ({"data": [["x"] * 101]}, "At most 100 columns"),
+                            ({"data": [["x"] * 50] * 101}, "At most 5000 cells"),
+                            ({"data": [["A", "B"]], "col_widths": [1]}, "1 widths for 2 columns"),
+                            ({"data": [["A"]], "col_widths": [0]}, "positive number"),
+                            ({"data": [["A"]], "text_height": 0}, "must be positive"),
+                            ({"data": [["A"]], "layer": "NOPE"}, "No layer named 'NOPE'")]:
+        with pytest.raises(AcadError, match=message):
+            tables.add_table([0, 0], **kwargs)
+    assert doc.space.items == [] and doc.undo_log == []
+    with pytest.raises(AcadError, match="No table style named 'FANCY'"):
+        tables.add_table([0, 0], [["A"]], style="FANCY")
+    with pytest.raises(pywintypes.com_error):
+        tables.add_table([0, 0], [["A", "B"], ["C", "REFUSE"]])
+    assert doc.space.items == []  # both tables rolled back
