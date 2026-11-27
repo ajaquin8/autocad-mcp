@@ -16,6 +16,7 @@ from .tools import (  # noqa: F401
     documents,
     draw,
     edit,
+    hatch,
     layers,
     plot,
     query,
