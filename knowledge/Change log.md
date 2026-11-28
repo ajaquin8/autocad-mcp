@@ -378,3 +378,9 @@ Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log back
 - **user-reported (2026-11-23 audit):** a tool call that timed out or that the client cancelled stayed queued on the COM worker and ran later.
 - **Fix:** `com.py` `ComWorker.submit`/`wait` with a per-call deadline; queued calls past their deadline, timed out or cancelled by the client are dropped unrun; while a started call that timed out is still running, new calls fail at once (`AcadStuck`). `app.py` cancels the queued call when the MCP client cancels. Details: [[Decisions/Edit guard and document safety]] (2026-11-25). README safety list updated.
 - Tests: 4 new offline tests; the five checks pass. **Not live-verified** against AutoCAD.
+
+## 2026-11-28: capture_view can save the picture as a PNG file (GAP-001)
+Writer: gd-coder (Hermes morning MCP-fix lane), from the NightDraft gap log backlog. Branch `gap/GAP-001-capture-output-path`.
+- **user-reported (2026-11-22 smoke test):** capture_view had no output path, so a screenshot that had to sit next to a drawing had to be found and copied by hand.
+- **Fix:** `capture_view(output_path=..., overwrite=False)` also writes the PNG it returns. The path must be a full path ending in `.png` in a folder that exists; an existing file is refused unless `overwrite=True` (and the write uses exclusive create, so a file that appears meanwhile is not replaced). All checks run before AutoCAD is touched. The result is then two blocks: the picture and a JSON note `{"saved": <path>, "bytes": <n>}`. `app.py` `_render` turns a tuple result into several content blocks. Without `output_path` the result is the picture alone, as before.
+- Tests: 3 new offline tests (178 in the whole suite); the five checks pass. **Not live-verified** against AutoCAD (it was not running).

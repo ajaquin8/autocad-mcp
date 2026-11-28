@@ -2804,3 +2804,67 @@ def test_other_servers_leaves_out_this_server_and_counts_launchers_once(monkeypa
         raise OSError("WMI unavailable")
     monkeypatch.setattr(docs_module.win32com.client, "GetObject", no_wmi)
     assert docs_module._other_servers() == []
+
+
+# ---------- capture_view output_path (GAP-001) ----------
+
+
+@pytest.fixture()
+def fake_window(fake_app, monkeypatch):
+    """capture_view without a real window: a fixed PNG, no sleeps."""
+    fake_app.HWND = 4242
+    fake_app.Update = lambda: None
+    shots = []
+
+    def png(hwnd, max_width):
+        shots.append((hwnd, max_width))
+        return b"\x89PNG fake " + str(max_width).encode()
+    monkeypatch.setattr(query, "window_png", png)
+    monkeypatch.setattr(query.win32gui, "IsIconic", lambda hwnd: False)
+    monkeypatch.setattr(query.time, "sleep", lambda s: None)
+    return shots
+
+
+def test_capture_view_saves_png_when_output_path_given(fake_window, tmp_path):
+    from mcp.server.mcpserver import Image
+
+    assert isinstance(query.capture_view(), Image)  # no output_path: just the picture, as before
+    target = tmp_path / "view.png"
+    picture, note = query.capture_view(max_width=800, output_path=str(target))
+    assert isinstance(picture, Image)
+    assert target.read_bytes() == b"\x89PNG fake 800" == picture.data
+    assert note == {"saved": str(target), "bytes": len(b"\x89PNG fake 800")}
+    # Through the MCP: an image block plus a JSON text block naming the file.
+    target.unlink()
+    result = asyncio.run(mcp.call_tool("capture_view", {"output_path": str(target)}))
+    blocks = result.content
+    assert [b.type for b in blocks] == ["image", "text"]
+    assert json.loads(blocks[1].text)["saved"] == str(target)
+    assert target.exists()
+
+
+def test_capture_view_refuses_bad_output_paths_before_touching_autocad(fake_window, tmp_path):
+    existing = tmp_path / "old.png"
+    existing.write_bytes(b"keep me")
+    cases = [
+        ("view.png", "full path"),
+        (str(tmp_path / "view.jpg"), r"end in \.png"),
+        (str(tmp_path / "missing" / "view.png"), "does not exist"),
+        (str(existing), "already exists.*overwrite=True"),
+    ]
+    for path, message in cases:
+        with pytest.raises(AcadError, match=message):
+            query.capture_view(output_path=path)
+    assert fake_window == []  # refused before any screenshot
+    assert existing.read_bytes() == b"keep me"
+    picture, note = query.capture_view(output_path=str(existing), overwrite=True)
+    assert existing.read_bytes() == picture.data and note["saved"] == str(existing)
+
+
+def test_render_turns_a_tuple_into_several_content_blocks():
+    from mcp.server.mcpserver import Image
+
+    picture = Image(data=b"x", format="png")
+    rendered = _render((picture, {"saved": "C:\\Jobs\\a.png"}))
+    assert rendered[0] is picture and json.loads(rendered[1]) == {"saved": "C:\\Jobs\\a.png"}
+    assert _render({"a": 1}) == json.dumps({"a": 1}, indent=1)

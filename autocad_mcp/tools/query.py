@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import os
 import time
 from collections import Counter
 
@@ -146,14 +147,49 @@ def window_png(hwnd: int, max_width: int) -> bytes:
     return buffer.getvalue()
 
 
+def check_png_path(path: str, overwrite: bool) -> str:
+    """The normalized output path, or AcadError if it is not a full .png path in an existing
+    folder, or if the file exists and overwrite is off. Checked before AutoCAD is touched."""
+    path = path.strip()
+    if not os.path.isabs(path):
+        raise AcadError(f"output_path must be a full path such as C:\\Jobs\\view.png, not '{path}'.")
+    path = os.path.normpath(path)
+    if not path.lower().endswith(".png"):
+        raise AcadError("output_path must end in .png")
+    folder = os.path.dirname(path)
+    if not os.path.isdir(folder):
+        raise AcadError(f"The folder {folder} does not exist; create it first or pick another one.")
+    if os.path.isdir(path):
+        raise AcadError(f"{path} is a folder, not a file name.")
+    if os.path.exists(path) and not overwrite:
+        raise AcadError(f"{path} already exists. Pass overwrite=True only if the user agreed to replace it.")
+    return path
+
+
+def write_png(path: str, data: bytes, overwrite: bool) -> None:
+    """Write the picture; without overwrite, refuse a file that appeared since the check."""
+    try:
+        with open(path, "wb" if overwrite else "xb") as fh:
+            fh.write(data)
+    except FileExistsError:
+        raise AcadError(f"{path} already exists. Pass overwrite=True only if the user agreed to replace it.") from None
+    except OSError as err:
+        raise AcadError(f"Could not write {path}: {err.strerror or err}") from None
+
+
 @acad_tool(read_only=True)
-def capture_view(max_width: int = 1600) -> Image:
+def capture_view(max_width: int = 1600, output_path: str = "",
+                 overwrite: bool = False) -> Image | tuple[Image, dict]:
     """Screenshot the AutoCAD window so you can SEE the drawing. Use after drawing steps
     (zoom_extents first if the new geometry may be off screen).
 
     Args:
         max_width: scale the picture down to at most this many pixels wide (400-3000).
+        output_path: also save the picture as this PNG file (full path ending in .png, in a
+            folder that exists). The result then adds a note with the saved path and size.
+        overwrite: allow replacing an existing file at output_path.
     """
+    target = check_png_path(output_path, overwrite) if output_path.strip() else ""
     app = session.app
     hwnd = int(app.HWND)
     if win32gui.IsIconic(hwnd):
@@ -164,4 +200,9 @@ def capture_view(max_width: int = 1600) -> Image:
         time.sleep(0.1)
     app.Update()
     time.sleep(0.4)
-    return Image(data=window_png(hwnd, max(400, min(int(max_width), 3000))), format="png")
+    data = window_png(hwnd, max(400, min(int(max_width), 3000)))
+    picture = Image(data=data, format="png")
+    if not target:
+        return picture
+    write_png(target, data, overwrite)
+    return picture, {"saved": target, "bytes": len(data)}

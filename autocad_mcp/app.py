@@ -82,6 +82,8 @@ def _blockers(err: BaseException) -> str:
 
 
 def _render(result: Any) -> Any:
+    if isinstance(result, tuple):  # several content blocks, e.g. a picture plus a JSON note
+        return [_render(item) for item in result]
     if isinstance(result, (str, Image)) or result is None:
         return result if result is not None else "ok"
     return json.dumps(result, indent=1, ensure_ascii=False, default=str)
